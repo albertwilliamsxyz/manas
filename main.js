@@ -1,4 +1,14 @@
+const generateRandomColor = () => [Math.random(), Math.random(), Math.random(), 1]
+
 const numberOfJointsPerHand = 25;
+
+const handSkeletonByJointIndices = [
+  0, 1, 1, 2, 2, 3, 3, 4,
+  0, 5, 5, 6, 6, 7, 7, 8, 8, 9,
+  0, 10, 10, 11, 11, 12, 12, 13, 13, 14,
+  0, 15, 15, 16, 16, 17, 17, 18, 18, 19,
+  0, 20, 20, 21, 21, 22, 22, 23, 23, 24
+];
 
 const exampleLeftHand = [
   -0.1766360104084015, 0.07610338926315308, -0.015291444957256317,
@@ -141,17 +151,16 @@ uniform mat4 u_projection;
 uniform mat4 u_view;
 void main() {
   gl_Position = u_projection * u_view * vec4(a_position, 1.0);
-  gl_PointSize = 15.0;
+  gl_PointSize = 10.0;
 }
 `
 
 const fragmentShaderSource = webGL2Version + `
 precision highp float;
-
 out vec4 outColor;
-
+uniform vec4 u_color;
 void main() {
-  outColor = vec4(0.2, 0.7, 0.2, 0.2);
+  outColor = u_color;
 }
 `
 
@@ -273,6 +282,67 @@ const main = async () => {
   )
   gl.enableVertexAttribArray(positionAttributeLocation)
 
+  // Hands skeleton joint index buffer
+
+  const handSkeletonJointIndicesBuffer = gl.createBuffer()
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, handSkeletonJointIndicesBuffer)
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(handSkeletonByJointIndices), gl.STATIC_DRAW)
+
+  // Left hand skeleton
+
+  const leftHandSkeletonVAO = gl.createVertexArray()
+  gl.bindVertexArray(leftHandSkeletonVAO)
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, leftHandBuffer)
+  gl.vertexAttribPointer(
+    positionAttributeLocation,
+    numberOfDimensions,
+    gl.FLOAT,
+    false,
+    0,
+    0
+  )
+  gl.enableVertexAttribArray(positionAttributeLocation)
+
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, handSkeletonJointIndicesBuffer)
+
+  // Right hand skeleton
+
+  const rightHandSkeletonVAO = gl.createVertexArray()
+  gl.bindVertexArray(rightHandSkeletonVAO)
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, rightHandBuffer)
+  gl.vertexAttribPointer(
+    positionAttributeLocation,
+    numberOfDimensions,
+    gl.FLOAT,
+    false,
+    0,
+    0
+  )
+  gl.enableVertexAttribArray(positionAttributeLocation)
+
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, handSkeletonJointIndicesBuffer)
+
+  // Drawings
+
+  const drawingBuffer = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, drawingBuffer)
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(), gl.DYNAMIC_DRAW)
+
+  const drawingVAO = gl.createVertexArray()
+  gl.bindVertexArray(drawingVAO)
+
+  gl.vertexAttribPointer(
+    positionAttributeLocation,
+    numberOfDimensions,
+    gl.FLOAT,
+    false,
+    0,
+    0
+  )
+  gl.enableVertexAttribArray(positionAttributeLocation)
+
   // Set up of the projection and view matrices
 
   const identityMatrix = new Float32Array([
@@ -287,6 +357,9 @@ const main = async () => {
 
   const viewLocation = gl.getUniformLocation(program, 'u_view');
   gl.uniformMatrix4fv(viewLocation, false, identityMatrix);
+
+  const colorLocation = gl.getUniformLocation(program, 'u_color');
+  gl.uniform4fv(colorLocation, new Float32Array(generateRandomColor()));
 
   startVRButton.onclick = async () => {
     const xrSession = await navigator.xr.requestSession('immersive-ar', {
@@ -307,9 +380,12 @@ const main = async () => {
 
     const referenceSpace = await xrSession.requestReferenceSpace('local');
 
+    const drawingVertices = [];
+
     const onXRFrame = (time, xrFrame) => {
-      const leftHandVertices = new Array(numberOfJointsPerHand * numberOfDimensions).fill(0);
-      const rightHandVertices = new Array(numberOfJointsPerHand * numberOfDimensions).fill(0);
+      const leftHandVertices = new Float32Array(numberOfJointsPerHand * numberOfDimensions).fill(0);
+      const rightHandVertices = new Float32Array(numberOfJointsPerHand * numberOfDimensions).fill(0);
+
       for (const inputSource of xrSession.inputSources) {
         if (!inputSource.hand) continue
 
@@ -334,6 +410,48 @@ const main = async () => {
       gl.bindBuffer(gl.ARRAY_BUFFER, rightHandBuffer);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(rightHandVertices), 0, rightHandVertices.length);
 
+      if (leftHandVertices.length) {
+        const leftHandIndexFingerTipIndex = leftHandVertices.subarray(
+          jointToIndex['index-finger-tip'] * numberOfDimensions,
+          jointToIndex['index-finger-tip'] * numberOfDimensions + numberOfDimensions
+        );
+        const leftHandThumbTipIndex = leftHandVertices.subarray(
+          jointToIndex['thumb-tip'] * numberOfDimensions,
+          jointToIndex['thumb-tip'] * numberOfDimensions + numberOfDimensions
+        );
+        const distanceBetweenLeftHandIndexFingerTipAndThumbTip = Math.sqrt(
+          (leftHandIndexFingerTipIndex[0] - leftHandThumbTipIndex[0]) ** 2 +
+          (leftHandIndexFingerTipIndex[1] - leftHandThumbTipIndex[1]) ** 2 +
+          (leftHandIndexFingerTipIndex[2] - leftHandThumbTipIndex[2]) ** 2
+        )
+        console.log('Distance between left hand index finger tip and thumb tip:', distanceBetweenLeftHandIndexFingerTipAndThumbTip);
+        if (distanceBetweenLeftHandIndexFingerTipAndThumbTip < 0.016) {
+          drawingVertices.push(...leftHandIndexFingerTipIndex);
+        }
+      }
+
+      if (rightHandVertices.length) {
+        const rightHandIndexFingerTipIndex = rightHandVertices.subarray(
+          jointToIndex['index-finger-tip'] * numberOfDimensions,
+          jointToIndex['index-finger-tip'] * numberOfDimensions + numberOfDimensions
+        );
+        const rightHandThumbTipIndex = rightHandVertices.subarray(
+          jointToIndex['thumb-tip'] * numberOfDimensions,
+          jointToIndex['thumb-tip'] * numberOfDimensions + numberOfDimensions
+        );
+        const distanceBetweenrightHandIndexFingerTipAndThumbTip = Math.sqrt(
+          (rightHandIndexFingerTipIndex[0] - rightHandThumbTipIndex[0]) ** 2 +
+          (rightHandIndexFingerTipIndex[1] - rightHandThumbTipIndex[1]) ** 2 +
+          (rightHandIndexFingerTipIndex[2] - rightHandThumbTipIndex[2]) ** 2
+        )
+        if (distanceBetweenrightHandIndexFingerTipAndThumbTip < 0.016) {
+          gl.uniform4fv(colorLocation, new Float32Array(generateRandomColor()));
+        }
+      }
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, drawingBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(drawingVertices), gl.DYNAMIC_DRAW);
+
       const pose = xrFrame.getViewerPose(referenceSpace);
       if (!pose) {
         xrSession.requestAnimationFrame(onXRFrame);
@@ -352,13 +470,23 @@ const main = async () => {
         gl.uniformMatrix4fv(viewLocation, false, view.transform.inverse.matrix);
 
         gl.bindVertexArray(mainModelVAO);
-        gl.drawArrays(gl.TRIANGLES, 0, numberOfVerticesInMainModel);
+        gl.drawArrays(gl.POINTS, 0, numberOfVerticesInMainModel);
+        gl.drawArrays(gl.LINE_LOOP, 0, numberOfVerticesInMainModel);
 
         gl.bindVertexArray(leftHandVAO);
         gl.drawArrays(gl.POINTS, 0, numberOfJointsPerHand);
 
+        gl.bindVertexArray(leftHandSkeletonVAO);
+        gl.drawElements(gl.LINES, handSkeletonByJointIndices.length, gl.UNSIGNED_SHORT, 0);
+
         gl.bindVertexArray(rightHandVAO);
         gl.drawArrays(gl.POINTS, 0, numberOfJointsPerHand);
+
+        gl.bindVertexArray(rightHandSkeletonVAO);
+        gl.drawElements(gl.LINES, handSkeletonByJointIndices.length, gl.UNSIGNED_SHORT, 0);
+
+        gl.bindVertexArray(drawingVAO);
+        gl.drawArrays(gl.POINTS, 0, drawingVertices.length / numberOfDimensions);
       }
 
       xrSession.requestAnimationFrame(onXRFrame);
