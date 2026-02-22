@@ -1,5 +1,12 @@
 {
   "devDependencies": {
+    "@types/webxr": "^0.5.24",
     "@vitejs/plugin-basic-ssl": "^2.1.4"
+  },
+  "dependencies": {
+    "fp-ts": "^2.16.11",
+    "lodash": "^4.17.23",
+    "monocle-ts": "^2.3.13",
+    "uuid": "^13.0.0"
   }
 }
