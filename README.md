@@ -31,6 +31,15 @@ This program aims to elevate human cognition by providing an immersive, holistic
 
 ---
 
+## Documentation
+
+- **[docs/LINEAR_ALGEBRA.md](docs/LINEAR_ALGEBRA.md)**: Comprehensive guide to linear algebra for computer graphics, covering scalars, vectors, matrices, and transformations.
+- **[docs/HOMOTOPY_TYPE_THEORY.md](docs/HOMOTOPY_TYPE_THEORY.md)**: Guide to dependent type theory and homotopy type theory (HoTT), covering the Curry–Howard correspondence, Π and Σ types, identity types, univalence, higher inductive types, and their connections to category theory and TypeScript.
+- **[docs/architecture/DESIGN.md](docs/architecture/DESIGN.md)**: Categorical implementation plan describing the type system and morphisms of the Universe model.
+- **[docs/architecture/NOTES.md](docs/architecture/NOTES.md)**: Architecture notes and design decisions.
+
+---
+
 ## Usage
 
 - Requires a browser with WebXR and WebGL2 support.
