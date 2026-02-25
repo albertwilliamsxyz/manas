@@ -25,9 +25,15 @@ This program aims to elevate human cognition by providing an immersive, holistic
 
 ## Architecture
 
-- **main.js**: Core logic for rendering, hand tracking, gesture recognition, and drawing.
+- **main.ts**: Core logic for rendering, hand tracking, gesture recognition, and drawing.
 - **vite.config.js**: Vite configuration for secure development server.
-- **ROADMAP.md**: Detailed development plan and theoretical frameworks for future enhancements.
+
+## Documentation
+
+- **docs/LINEAR_ALGEBRA.md**: Comprehensive guide to linear algebra for computer graphics, structured as a conceptual tree.
+- **docs/TYPE_THEORY.md**: Guide to type theory in TypeScript — algebraic data types, generics, category theory connections, and the full Universe type hierarchy.
+- **docs/architecture/DESIGN.md**: Categorical implementation plan expressed in Haskell-style types.
+- **docs/architecture/NOTES.md**: Architecture research notes and design decisions.
 
 ---
 
