@@ -1,6 +1,3 @@
-import * as O from 'fp-ts/Option'
-import * as E from 'fp-ts/Either'
-
 const IDENTITY_MATRIX: Float32Array = new Float32Array([
   1, 0, 0, 0,
   0, 1, 0, 0,
@@ -79,118 +76,64 @@ void main() {
 console.log('Starting application');
 
 (async () => {
-  // navigator layer
-
-  const getApplicationCanvas = (): O.Option<HTMLCanvasElement> => {
-    const applicationCanvas: HTMLCanvasElement | null = (
-      document.getElementById('application') as HTMLCanvasElement | null
-    )
-    return applicationCanvas ? O.some(applicationCanvas) : O.none
-  }
-
-  // navigation layer: implementation
-
-  const applicationCanvas: HTMLCanvasElement | null = O.match(
-    () => null,
-    (canvas: HTMLCanvasElement) => canvas
-  )(getApplicationCanvas())
+  const applicationCanvas: HTMLCanvasElement | null = (
+    document.getElementById('application') as HTMLCanvasElement | null
+  )
 
   if (!applicationCanvas) {
     console.error('Application canvas not found')
     return
   }
 
-  // graphic layer
-
-  const createGraphicLibraryContext: (applicationCanvas: HTMLCanvasElement) => E.Either<Error, WebGL2RenderingContext> = (
-    applicationCanvas: HTMLCanvasElement
-  ) => {
-    const gl: WebGL2RenderingContext | null = applicationCanvas.getContext('webgl2')
-    return gl ? E.right(gl) : E.left(new Error('WebGL2 not supported'))
+  const gl: WebGL2RenderingContext | null = applicationCanvas.getContext('webgl2')
+  if (!gl) {
+    console.error('WebGL2 not supported')
+    return
   }
 
-  const createVertexShader: (gl: WebGL2RenderingContext) => E.Either<Error, WebGLShader> = (
-    gl: WebGL2RenderingContext
-  ) => {
-    const vertexShader: WebGLShader | null = gl.createShader(gl.VERTEX_SHADER)
-    return vertexShader ? E.right(vertexShader) : E.left(new Error('Unable to create vertex shader'))
+  await gl.makeXRCompatible()
+
+  const xr: XRSystem | undefined = navigator.xr
+  if (!xr) {
+    console.error('WebXR not supported')
+    return
   }
 
-  const initializeVertexShader: (
-    gl: WebGL2RenderingContext,
-    vertexShader: WebGLShader
-  ) => E.Either<Error, WebGLShader> = (
-    gl: WebGL2RenderingContext,
-    vertexShader: WebGLShader
-  ) => {
-      gl.shaderSource(vertexShader, VERTEX_SHADER_SOURCE)
-      gl.compileShader(vertexShader)
-      if (gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
-        return E.right(vertexShader)
-      } else {
-        gl.deleteShader(vertexShader)
-        const errorMessage: string = gl.getShaderInfoLog(vertexShader) || 'Unknown error'
-        return E.left(
-          new Error(
-            `There was an error while compiling the ${gl.VERTEX_SHADER} shader: ${errorMessage}`
-          )
-        )
-      }
-    }
-
-  const createFragmentShader: (gl: WebGL2RenderingContext) => E.Either<Error, WebGLShader> = (
-    gl: WebGL2RenderingContext
-  ) => {
-    const fragmentShader: WebGLShader | null = gl.createShader(gl.FRAGMENT_SHADER)
-    return fragmentShader ? E.right(fragmentShader) : E.left(new Error('Unable to create fragment shader'))
+  const isWebXRSupported: boolean = await xr.isSessionSupported('immersive-ar')
+  if (!isWebXRSupported) {
+    console.error('WebXR not supported')
+    return
   }
 
-  const initializeFragmentShader: (
-    gl: WebGL2RenderingContext,
-    fragmentShader: WebGLShader
-  ) => E.Either<Error, WebGLShader> = (
-    gl: WebGL2RenderingContext,
-    fragmentShader: WebGLShader
-  ) => {
-      gl.shaderSource(fragmentShader, FRAGMENT_SHADER_SOURCE)
-      gl.compileShader(fragmentShader)
-      if (gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
-        return E.right(fragmentShader)
-      } else {
-        gl.deleteShader(fragmentShader)
-        const errorMessage: string = gl.getShaderInfoLog(fragmentShader) || 'Unknown error'
-        return E.left(
-          new Error(
-            `There was an error while compiling the ${gl.FRAGMENT_SHADER} shader: ${errorMessage}`
-          )
-        )
-      }
-    }
+  const vertexShader: WebGLShader | null = gl.createShader(gl.VERTEX_SHADER)
+  if (!vertexShader) {
+    console.error('Unable to create vertex shader')
+    return
+  }
 
-  // graphic layer: implementation
+  gl.shaderSource(vertexShader, VERTEX_SHADER_SOURCE)
+  gl.compileShader(vertexShader)
+  if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+    console.error(`There was an error while compiling the ${gl.VERTEX_SHADER} shader`)
+    console.error(gl.getShaderInfoLog(vertexShader))
+    gl.deleteShader(vertexShader)
+    return
+  }
 
-  const gl: WebGL2RenderingContext | null = E.match(
-    (error: Error) => { throw error },
-    (gl: WebGL2RenderingContext) => gl
-  )(createGraphicLibraryContext(applicationCanvas))
+  const fragmentShader: WebGLShader | null = gl.createShader(gl.FRAGMENT_SHADER)
+  if (!fragmentShader) {
+    console.error('Unable to create fragment shader')
+    return
+  }
 
-  const vertexShaderOrError: E.Either<Error, WebGLShader> = E.chain(
-    (vertexShader: WebGLShader) => initializeVertexShader(gl, vertexShader)
-  )(createVertexShader(gl))
-
-  const vertexShader: WebGLShader | null = E.match(
-    (error: Error) => { throw error },
-    (vertexShader: WebGLShader) => vertexShader
-  )(vertexShaderOrError)
-
-  const fragmentShaderOrError: E.Either<Error, WebGLShader> = E.chain(
-    (fragmentShader: WebGLShader) => initializeFragmentShader(gl, fragmentShader)
-  )(createFragmentShader(gl))
-
-  const fragmentShader: WebGLShader | null = E.match(
-    (error: Error) => { throw error },
-    (fragmentShader: WebGLShader) => fragmentShader
-  )(fragmentShaderOrError)
+  gl.shaderSource(fragmentShader, FRAGMENT_SHADER_SOURCE)
+  gl.compileShader(fragmentShader)
+  if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+    console.error(`There was an error while compiling the ${gl.FRAGMENT_SHADER} shader`)
+    console.error(gl.getShaderInfoLog(fragmentShader))
+    gl.deleteShader(fragmentShader)
+    return
+  }
 
   gl.enable(gl.DEPTH_TEST)
 
@@ -236,22 +179,6 @@ console.log('Starting application');
     return
   }
   gl.uniform4fv(colorLocation, new Float32Array([0.0, 0.8, 0.0, 1.0]))
-
-  // I wanna run this first, before everything else, but I'll leave it here for now
-
-  await gl.makeXRCompatible()
-
-  const xr: XRSystem | undefined = navigator.xr
-  if (!xr) {
-    console.error('WebXR not supported')
-    return
-  }
-
-  const isWebXRSupported: boolean = await xr.isSessionSupported('immersive-ar')
-  if (!isWebXRSupported) {
-    console.error('WebXR not supported')
-    return
-  }
 
   // Application core
   // MAKE IT WORK MAKE IT RIGHT MAKE IT FAST
@@ -314,6 +241,33 @@ console.log('Starting application');
   const cubePosition: Float32Array = new Float32Array([0.0, 0.0, -0.5])
   const cubeRotation: Float32Array = new Float32Array([0.0, 0.0, 0.0])
   const cubeScale: Float32Array = new Float32Array([1.0, 1.0, 1.0])
+
+  // CODE
+
+  type Universe = {}
+
+  let universe: Universe = {}
+
+  const createUniverse = (): Universe => {
+    return {}
+  }
+  const updateUniverse = (universe: Universe): Universe => {
+    return universe
+  }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   // Hands skeleton joint index buffer
 
