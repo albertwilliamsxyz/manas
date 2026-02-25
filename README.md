@@ -31,6 +31,13 @@ This program aims to elevate human cognition by providing an immersive, holistic
 
 ---
 
+## Documentation
+
+- **[docs/CATEGORY_THEORY.md](docs/CATEGORY_THEORY.md)**: Comprehensive guide to category theory applied to software architecture — covers categories, morphisms, functors, natural transformations, monads, algebraic data types, lenses, and the Curry–Howard correspondence, with examples drawn from the TypeScript codebase.
+- **[docs/LINEAR_ALGEBRA.md](docs/LINEAR_ALGEBRA.md)**: Comprehensive guide to linear algebra applied to computer graphics — covers scalars, vectors, matrices, and transformation composition.
+
+---
+
 ## Usage
 
 - Requires a browser with WebXR and WebGL2 support.
