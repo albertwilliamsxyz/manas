@@ -4,6 +4,8 @@
 
 This document is a comprehensive guide to linear algebra applied to computer graphics, structured as a conceptual tree. Each section builds upon the previous, allowing for a deep and progressive understanding of the mathematics behind 3D transformations. The goal is for you to analyze, compose, and create your own operations, using the computer as a tool, but never as a substitute for your reasoning.
 
+> **See also**: [`CATEGORY_LINEAR_ALGEBRA.md`](./CATEGORY_LINEAR_ALGEBRA.md) for a treatment of these same concepts through the lens of category theory — understanding vector spaces as objects, linear maps as morphisms, and transformations as functors.
+
 ---
 
 ## Visión y Propósito
@@ -481,3 +483,9 @@ def compose_matrices(*matrices):
 ```
 2. Document each step: "First scale, then rotate, then translate..."
 3. Draw a diagram of the transformation pipeline.
+
+---
+
+## Next Steps: Category Theory
+
+Once you are comfortable with the concepts in this document, explore [`CATEGORY_LINEAR_ALGEBRA.md`](./CATEGORY_LINEAR_ALGEBRA.md) to understand why these structures exist and how they fit into the broader categorical architecture of this project.
