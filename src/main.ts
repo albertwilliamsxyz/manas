@@ -1,5 +1,6 @@
 import * as O from 'fp-ts/Option'
 import * as E from 'fp-ts/Either'
+import { pipe } from 'fp-ts/function'
 
 const IDENTITY_MATRIX: Float32Array = new Float32Array([
   1, 0, 0, 0,
@@ -76,136 +77,153 @@ void main() {
 }
 `
 
+// 0. Navigator Layer
+
+const getApplicationCanvas = (): O.Option<HTMLCanvasElement> => {
+  const applicationCanvas: HTMLCanvasElement | null = (
+    document.getElementById('application') as HTMLCanvasElement | null
+  )
+  return applicationCanvas ? O.some(applicationCanvas) : O.none
+}
+
+// 1. Core Layer (when defined)
+
+// 2. Graphics Layer
+
+const createGraphicLibraryContext: (applicationCanvas: HTMLCanvasElement) => E.Either<Error, WebGL2RenderingContext> = (
+  applicationCanvas: HTMLCanvasElement
+) => {
+  const gl: WebGL2RenderingContext | null = applicationCanvas.getContext('webgl2')
+  return gl ? E.right(gl) : E.left(new Error('WebGL2 not supported'))
+}
+
+const createVertexShader: (gl: WebGL2RenderingContext) => E.Either<Error, WebGLShader> = (
+  gl: WebGL2RenderingContext
+) => {
+  const vertexShader: WebGLShader | null = gl.createShader(gl.VERTEX_SHADER)
+  return vertexShader ? E.right(vertexShader) : E.left(new Error('Unable to create vertex shader'))
+}
+
+const initializeVertexShader: (
+  gl: WebGL2RenderingContext,
+  vertexShader: WebGLShader
+) => E.Either<Error, WebGLShader> = (
+  gl: WebGL2RenderingContext,
+  vertexShader: WebGLShader
+) => {
+    gl.shaderSource(vertexShader, VERTEX_SHADER_SOURCE)
+    gl.compileShader(vertexShader)
+    const compiledSuccessfully: boolean = Boolean(gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS))
+    if (compiledSuccessfully) {
+      return E.right(vertexShader)
+    } else {
+      gl.deleteShader(vertexShader)
+      const errorMessage: string = gl.getShaderInfoLog(vertexShader) || 'Unknown error'
+      return E.left(
+        new Error(
+          `There was an error while compiling the ${gl.VERTEX_SHADER} shader: ${errorMessage}`
+        )
+      )
+    }
+  }
+
+const createFragmentShader: (gl: WebGL2RenderingContext) => E.Either<Error, WebGLShader> = (
+  gl: WebGL2RenderingContext
+) => {
+  const fragmentShader: WebGLShader | null = gl.createShader(gl.FRAGMENT_SHADER)
+  return fragmentShader ? E.right(fragmentShader) : E.left(new Error('Unable to create fragment shader'))
+}
+
+const initializeFragmentShader: (
+  gl: WebGL2RenderingContext,
+  fragmentShader: WebGLShader
+) => E.Either<Error, WebGLShader> = (
+  gl: WebGL2RenderingContext,
+  fragmentShader: WebGLShader
+) => {
+    gl.shaderSource(fragmentShader, FRAGMENT_SHADER_SOURCE)
+    gl.compileShader(fragmentShader)
+    const compiledSuccessfully: boolean = Boolean(gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS))
+    if (compiledSuccessfully) {
+      return E.right(fragmentShader)
+    } else {
+      gl.deleteShader(fragmentShader)
+      const errorMessage: string = gl.getShaderInfoLog(fragmentShader) || 'Unknown error'
+      return E.left(
+        new Error(
+          `There was an error while compiling the ${gl.FRAGMENT_SHADER} shader: ${errorMessage}`
+        )
+      )
+    }
+  }
+
+const createProgram = (gl: WebGL2RenderingContext): WebGLProgram => {
+  return gl.createProgram()
+}
+
+const initializeProgram = (
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+  vertexShader: WebGLShader,
+  fragmentShader: WebGLShader
+): E.Either<Error, WebGLProgram> => {
+  for (const shader of [vertexShader, fragmentShader]) {
+    gl.attachShader(program, shader)
+  }
+  gl.linkProgram(program)
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    gl.deleteProgram(program)
+    const errorMessage: string = gl.getProgramInfoLog(program) || 'Unknown error'
+    return E.left(new Error(`Error while linking the program: ${errorMessage}`))
+  }
+  gl.useProgram(program)
+  return E.right(program)
+}
+
 console.log('Starting application');
 
 (async () => {
-  // navigator layer
-
-  const getApplicationCanvas = (): O.Option<HTMLCanvasElement> => {
-    const applicationCanvas: HTMLCanvasElement | null = (
-      document.getElementById('application') as HTMLCanvasElement | null
+  const applicationCanvas: HTMLCanvasElement | null = pipe(
+    getApplicationCanvas(),
+    O.match(
+      () => { throw new Error('Application canvas not found') },
+      (canvas: HTMLCanvasElement) => canvas
     )
-    return applicationCanvas ? O.some(applicationCanvas) : O.none
-  }
-
-  // navigation layer: implementation
-
-  const applicationCanvas: HTMLCanvasElement | null = O.match(
-    () => null,
-    (canvas: HTMLCanvasElement) => canvas
-  )(getApplicationCanvas())
-
-  if (!applicationCanvas) {
-    console.error('Application canvas not found')
-    return
-  }
-
-  // graphic layer
-
-  const createGraphicLibraryContext: (applicationCanvas: HTMLCanvasElement) => E.Either<Error, WebGL2RenderingContext> = (
-    applicationCanvas: HTMLCanvasElement
-  ) => {
-    const gl: WebGL2RenderingContext | null = applicationCanvas.getContext('webgl2')
-    return gl ? E.right(gl) : E.left(new Error('WebGL2 not supported'))
-  }
-
-  const createVertexShader: (gl: WebGL2RenderingContext) => E.Either<Error, WebGLShader> = (
-    gl: WebGL2RenderingContext
-  ) => {
-    const vertexShader: WebGLShader | null = gl.createShader(gl.VERTEX_SHADER)
-    return vertexShader ? E.right(vertexShader) : E.left(new Error('Unable to create vertex shader'))
-  }
-
-  const initializeVertexShader: (
-    gl: WebGL2RenderingContext,
-    vertexShader: WebGLShader
-  ) => E.Either<Error, WebGLShader> = (
-    gl: WebGL2RenderingContext,
-    vertexShader: WebGLShader
-  ) => {
-      gl.shaderSource(vertexShader, VERTEX_SHADER_SOURCE)
-      gl.compileShader(vertexShader)
-      if (gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
-        return E.right(vertexShader)
-      } else {
-        gl.deleteShader(vertexShader)
-        const errorMessage: string = gl.getShaderInfoLog(vertexShader) || 'Unknown error'
-        return E.left(
-          new Error(
-            `There was an error while compiling the ${gl.VERTEX_SHADER} shader: ${errorMessage}`
-          )
-        )
-      }
-    }
-
-  const createFragmentShader: (gl: WebGL2RenderingContext) => E.Either<Error, WebGLShader> = (
-    gl: WebGL2RenderingContext
-  ) => {
-    const fragmentShader: WebGLShader | null = gl.createShader(gl.FRAGMENT_SHADER)
-    return fragmentShader ? E.right(fragmentShader) : E.left(new Error('Unable to create fragment shader'))
-  }
-
-  const initializeFragmentShader: (
-    gl: WebGL2RenderingContext,
-    fragmentShader: WebGLShader
-  ) => E.Either<Error, WebGLShader> = (
-    gl: WebGL2RenderingContext,
-    fragmentShader: WebGLShader
-  ) => {
-      gl.shaderSource(fragmentShader, FRAGMENT_SHADER_SOURCE)
-      gl.compileShader(fragmentShader)
-      if (gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
-        return E.right(fragmentShader)
-      } else {
-        gl.deleteShader(fragmentShader)
-        const errorMessage: string = gl.getShaderInfoLog(fragmentShader) || 'Unknown error'
-        return E.left(
-          new Error(
-            `There was an error while compiling the ${gl.FRAGMENT_SHADER} shader: ${errorMessage}`
-          )
-        )
-      }
-    }
-
-  // graphic layer: implementation
+  )
 
   const gl: WebGL2RenderingContext | null = E.match(
     (error: Error) => { throw error },
     (gl: WebGL2RenderingContext) => gl
   )(createGraphicLibraryContext(applicationCanvas))
 
-  const vertexShaderOrError: E.Either<Error, WebGLShader> = E.chain(
-    (vertexShader: WebGLShader) => initializeVertexShader(gl, vertexShader)
-  )(createVertexShader(gl))
+  const vertexShader: WebGLShader = pipe(
+    createVertexShader(gl),
+    E.chain((vertexShader: WebGLShader) => initializeVertexShader(gl, vertexShader)),
+    E.match(
+      (error: Error) => { throw error },
+      (vertexShader: WebGLShader) => vertexShader
+    )
+  )
 
-  const vertexShader: WebGLShader | null = E.match(
-    (error: Error) => { throw error },
-    (vertexShader: WebGLShader) => vertexShader
-  )(vertexShaderOrError)
-
-  const fragmentShaderOrError: E.Either<Error, WebGLShader> = E.chain(
-    (fragmentShader: WebGLShader) => initializeFragmentShader(gl, fragmentShader)
-  )(createFragmentShader(gl))
-
-  const fragmentShader: WebGLShader | null = E.match(
-    (error: Error) => { throw error },
-    (fragmentShader: WebGLShader) => fragmentShader
-  )(fragmentShaderOrError)
+  const fragmentShader: WebGLShader = pipe(
+    createFragmentShader(gl),
+    E.chain((fragmentShader: WebGLShader) => initializeFragmentShader(gl, fragmentShader)),
+    E.match(
+      (error: Error) => { throw error },
+      (fragmentShader: WebGLShader) => fragmentShader
+    )
+  )
 
   gl.enable(gl.DEPTH_TEST)
 
-  const program: WebGLProgram = gl.createProgram()
-  for (const shader of [vertexShader, fragmentShader]) {
-    gl.attachShader(program, shader)
-  }
-  gl.linkProgram(program)
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    console.error('Error while linking the program')
-    console.error(gl.getProgramInfoLog(program))
-    gl.deleteProgram(program)
-    return
-  }
-  gl.useProgram(program)
+  const program: WebGLProgram = pipe(
+    createProgram(gl),
+    (program: WebGLProgram) => initializeProgram(gl, program, vertexShader, fragmentShader),
+    E.match(
+      (error: Error) => { throw error },
+      (program: WebGLProgram) => program
+    )
+  )
 
   const positionLocation: GLint = gl.getAttribLocation(program, 'a_position')
 
