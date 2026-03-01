@@ -1,7 +1,7 @@
-.vite
 node_modules
 tmp
 /dist
 output
 .spago
 .purs-repl
+.certs

@@ -160,37 +160,48 @@ All WebGL2 and WebXR side effects are wrapped in the `Effect` monad, making the 
 - [PureScript compiler](https://github.com/purescript/purescript) (`purs` v0.15+)
 - [Spago](https://github.com/purescript/spago) package manager
 - Node.js 18+
+- OpenSSL (for self-signed certificate generation; pre-installed on macOS/Linux)
 
 ### Install Dependencies
 
 ```bash
 npm install -g purescript spago
 spago install
+npm install
 ```
 
-### Compile
+### Build
 
 ```bash
-# Using spago
-spago build
-
-# Or directly with purs
-purs compile 'src/**/*.purs' '.spago/p/*/src/**/*.purs' --output output
+# Full build: compile PureScript + bundle for browser
+npm run build
 ```
+
+This runs two steps:
+1. `purs compile` — compiles `.purs` sources to CommonJS modules in `output/`
+2. `esbuild` — bundles `output/Main/index.js` into a single browser-ready `dist/app.js`
 
 ### Development Server
 
 ```bash
+# Local only (localhost:8443)
 npm run dev
+
+# Exposed on LAN for Meta Quest testing
+npm run dev:host
 ```
 
-This starts a Vite dev server with HTTPS (required for WebXR).
+The dev server:
+- Serves over HTTPS with an auto-generated self-signed certificate (required for WebXR)
+- With `dev:host`, binds to `0.0.0.0` and prints your network address for Meta Quest access
 
 ### Usage
 
-1. Open the application in a WebXR-capable browser
-2. Click "Start Experience" to launch the immersive AR session
-3. Use hand gestures to interact with the 3D environment
+1. Run `npm run dev:host` to start the HTTPS dev server
+2. On your Meta Quest, navigate to the network URL shown in the terminal (e.g. `https://192.168.x.x:8443/`)
+3. Accept the self-signed certificate warning
+4. Click "Start Experience" to launch the immersive AR session
+5. Use hand gestures to interact with the 3D environment
 
 ---
 
@@ -204,6 +215,8 @@ This starts a Vite dev server with HTTPS (required for WebXR).
 | `lodash` | Utility functions |
 | `monocle-ts` | Optics/lenses for immutable data |
 | `uuid` | Unique identifier generation |
+| `vite` | Dev server and bundler |
+| `@vitejs/plugin-basic-ssl` | Self-signed HTTPS for Vite |
 
 ### Added (PureScript)
 
@@ -216,6 +229,16 @@ This starts a Vite dev server with HTTPS (required for WebXR).
 | `either` | Either type for error handling |
 | `arrays` | Array operations |
 | `nullable` | FFI interop for nullable JavaScript values |
+
+### Dev Tooling (npm)
+
+| Package | Purpose |
+|---------|---------|
+| `esbuild` | Bundles PureScript CommonJS output into browser-ready IIFE |
+
+### Dev Server
+
+The HTTPS dev server (`dev-server.mjs`) uses only Node.js built-in modules (`node:https`, `node:fs`, `node:child_process`, `node:os`) and OpenSSL for certificate generation. No additional npm packages required.
 
 ---
 

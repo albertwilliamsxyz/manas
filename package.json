@@ -1,12 +1,13 @@
 {
   "scripts": {
     "build:purs": "purs compile 'src/**/*.purs' '.spago/p/*/src/**/*.purs' --output output",
-    "dev": "vite",
-    "build": "npm run build:purs && vite build"
+    "bundle": "esbuild output/Main/index.js --bundle --outfile=dist/app.js --format=iife --global-name=PS --footer:js='PS.main();'",
+    "build": "npm run build:purs && npm run bundle",
+    "dev": "npm run build && node dev-server.mjs",
+    "dev:host": "npm run build && node dev-server.mjs --host"
   },
   "devDependencies": {
-    "@types/webxr": "^0.5.24",
-    "@vitejs/plugin-basic-ssl": "^2.1.4"
+    "esbuild": "^0.25.0"
   },
   "dependencies": {}
 }
