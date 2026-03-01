@@ -344,8 +344,10 @@ const createVertexShader: (gl: WebGL2RenderingContext) => E.Either<Error, WebGLS
 ```purescript
 createVertexShader :: WebGL2RenderingContext -> Effect (Either Error WebGLShader)
 createVertexShader gl = do
-  shader <- GL.createShader gl VertexShader
-  pure $ maybe (Left (error "Unable to create vertex shader")) Right shader
+  result <- GL.createShader gl VertexShader
+  pure $ case result of
+    Nothing -> Left (error "Unable to create vertex shader")
+    Just shader -> Right shader
 ```
 
 ### Function Composition
