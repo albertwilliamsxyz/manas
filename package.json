@@ -1,12 +1,30 @@
 {
-  "devDependencies": {
-    "@types/webxr": "^0.5.24",
-    "@vitejs/plugin-basic-ssl": "^2.1.4"
+  "name": "manas",
+  "version": "1.0.0",
+  "description": "This program aims to elevate human cognition by providing an immersive, holistic experience. Users can express and experiment with any model of the world they imagine, using a general framework that allows ideas to be run or evaluated in a live environment.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "test"
   },
-  "dependencies": {
-    "fp-ts": "^2.16.11",
-    "lodash": "^4.17.23",
-    "monocle-ts": "^2.3.13",
-    "uuid": "^13.0.0"
+  "scripts": {
+    "build": "spago bundle --module Main --outfile dist/main.js --platform browser",
+    "dev": "spago bundle --module Main --outfile dist/main.js --platform browser --watch",
+    "serve": "npx --yes serve . -p 3000",
+    "serve:https": "node serve-https.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/albertwilliamsxyz/manas.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/albertwilliamsxyz/manas/issues"
+  },
+  "homepage": "https://github.com/albertwilliamsxyz/manas#readme",
+  "devDependencies": {
+    "esbuild": "^0.27.3"
   }
 }

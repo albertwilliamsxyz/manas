@@ -1,4 +1,8 @@
-.vite
-node_modules
-tmp
+/.spago
+/node_modules
+/tmp
 /dist
+/output
+.dev-key.pem
+.dev-cert.pem
+.pcs-ide-port
