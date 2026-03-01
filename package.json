@@ -1,7 +1,6 @@
 {
   "scripts": {
     "build:purs": "purs compile 'src/**/*.purs' '.spago/p/*/src/**/*.purs' --output output",
-    "bundle": "spago bundle --outfile dist/index.js || purs-backend-es build || node -e \"const fs=require('fs'); const m=require('./output/Main/index.js'); fs.writeFileSync('dist/index.js', 'import {main} from \\\"./Main/index.js\\\"; main();');\"",
     "dev": "vite",
     "build": "npm run build:purs && vite build"
   },

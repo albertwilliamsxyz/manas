@@ -44,6 +44,8 @@ export const distanceImpl = function (arr) {
     return function (idx2) {
       if (
         !arr ||
+        idx1 < 0 ||
+        idx2 < 0 ||
         arr.length < idx1 + 3 ||
         arr.length < idx2 + 3
       ) {

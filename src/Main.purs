@@ -2,20 +2,17 @@ module Main where
 
 import Prelude
 
-import Data.Array (length)
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
 import Effect.Console (log, error)
 
 import Manas.Constants
   ( baseNumberOfDimensions
-  , numberOfJointsPerHand
   , numberOfHandJointDimensions
   , handSkeletonByJointIndices
   , cubeVertices
   , indexFingerTip
   , thumbTip
-  , lookupJointIndex
   )
 import Manas.Shaders (vertexShaderSource, fragmentShaderSource)
 import Manas.Graphics as G
@@ -295,15 +292,12 @@ main = do
                                     }
 
                               setupStartButton "start-experience" do
-                                startXRSession gl xr uniforms xrLayer vaos leftHand rightHand
-                                where
-                                  xrLayer = unit -- placeholder, created in startXRSession
+                                startXRSession gl xr uniforms vaos leftHand rightHand
 
 startXRSession
   :: G.WebGL2Context
   -> XR.XRSystem
   -> UniformLocations
-  -> Unit
   -> { cubeVAO :: G.WebGLVertexArray
      , leftHandVAO :: G.WebGLVertexArray
      , leftSkeletonVAO :: G.WebGLVertexArray
@@ -313,7 +307,7 @@ startXRSession
   -> { vao :: G.WebGLVertexArray, buffer :: G.WebGLBuffer }
   -> { vao :: G.WebGLVertexArray, buffer :: G.WebGLBuffer }
   -> Effect Unit
-startXRSession gl xr uniforms _ vaos leftHand rightHand = do
+startXRSession gl xr uniforms vaos leftHand rightHand = do
   session <- XR.requestSession xr "immersive-ar"
   layer <- XR.createXRWebGLLayer session gl
   XR.updateRenderState session layer
