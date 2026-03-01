@@ -1,5 +1,6 @@
 import * as O from 'fp-ts/Option'
 import * as E from 'fp-ts/Either'
+import * as TE from 'fp-ts/TaskEither'
 import { pipe } from 'fp-ts/function'
 
 const IDENTITY_MATRIX: Float32Array = new Float32Array([
@@ -55,6 +56,50 @@ const HAND_JOINT_INDICES_BY_NAME: { [key: string]: number } = {
   'pinky-finger-tip': 24
 }
 
+const CUBE_VERTICES: Float32Array = new Float32Array([
+  -0.1, -0.1, 0.1,
+  0.1, -0.1, 0.1,
+  0.1, 0.1, 0.1,
+  -0.1, -0.1, 0.1,
+  0.1, 0.1, 0.1,
+  -0.1, 0.1, 0.1,
+
+  0.1, -0.1, -0.1,
+  -0.1, -0.1, -0.1,
+  -0.1, 0.1, -0.1,
+  0.1, -0.1, -0.1,
+  -0.1, 0.1, -0.1,
+  0.1, 0.1, -0.1,
+
+  0.1, -0.1, 0.1,
+  0.1, -0.1, -0.1,
+  0.1, 0.1, -0.1,
+  0.1, -0.1, 0.1,
+  0.1, 0.1, -0.1,
+  0.1, 0.1, 0.1,
+
+  -0.1, -0.1, -0.1,
+  -0.1, -0.1, 0.1,
+  -0.1, 0.1, 0.1,
+  -0.1, -0.1, -0.1,
+  -0.1, 0.1, 0.1,
+  -0.1, 0.1, -0.1,
+
+  -0.1, 0.1, 0.1,
+  0.1, 0.1, 0.1,
+  0.1, 0.1, -0.1,
+  -0.1, 0.1, 0.1,
+  0.1, 0.1, -0.1,
+  -0.1, 0.1, -0.1,
+
+  -0.1, -0.1, -0.1,
+  0.1, -0.1, -0.1,
+  0.1, -0.1, 0.1,
+  -0.1, -0.1, -0.1,
+  0.1, -0.1, 0.1,
+  -0.1, -0.1, 0.1
+]);
+
 const WEBGL_2_VERSION_DECLARATION: string = '#version 300 es'
 
 const VERTEX_SHADER_SOURCE: string = WEBGL_2_VERSION_DECLARATION + `
@@ -90,11 +135,15 @@ const getApplicationCanvas = (): O.Option<HTMLCanvasElement> => {
 
 // 2. Graphics Layer
 
+// 2.1. WebGL2 Functional Wrappers
+
 const createGraphicLibraryContext: (applicationCanvas: HTMLCanvasElement) => E.Either<Error, WebGL2RenderingContext> = (
   applicationCanvas: HTMLCanvasElement
 ) => {
   const gl: WebGL2RenderingContext | null = applicationCanvas.getContext('webgl2')
-  return gl ? E.right(gl) : E.left(new Error('WebGL2 not supported'))
+  if (!gl) return E.left(new Error('WebGL2 not supported'))
+  gl.enable(gl.DEPTH_TEST)
+  return E.right(gl)
 }
 
 const createVertexShader: (gl: WebGL2RenderingContext) => E.Either<Error, WebGLShader> = (
@@ -114,9 +163,7 @@ const initializeVertexShader: (
     gl.shaderSource(vertexShader, VERTEX_SHADER_SOURCE)
     gl.compileShader(vertexShader)
     const compiledSuccessfully: boolean = Boolean(gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS))
-    if (compiledSuccessfully) {
-      return E.right(vertexShader)
-    } else {
+    if (!compiledSuccessfully) {
       gl.deleteShader(vertexShader)
       const errorMessage: string = gl.getShaderInfoLog(vertexShader) || 'Unknown error'
       return E.left(
@@ -125,6 +172,7 @@ const initializeVertexShader: (
         )
       )
     }
+    return E.right(vertexShader)
   }
 
 const createFragmentShader: (gl: WebGL2RenderingContext) => E.Either<Error, WebGLShader> = (
@@ -144,9 +192,7 @@ const initializeFragmentShader: (
     gl.shaderSource(fragmentShader, FRAGMENT_SHADER_SOURCE)
     gl.compileShader(fragmentShader)
     const compiledSuccessfully: boolean = Boolean(gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS))
-    if (compiledSuccessfully) {
-      return E.right(fragmentShader)
-    } else {
+    if (!compiledSuccessfully) {
       gl.deleteShader(fragmentShader)
       const errorMessage: string = gl.getShaderInfoLog(fragmentShader) || 'Unknown error'
       return E.left(
@@ -155,11 +201,10 @@ const initializeFragmentShader: (
         )
       )
     }
+    return E.right(fragmentShader)
   }
 
-const createProgram = (gl: WebGL2RenderingContext): WebGLProgram => {
-  return gl.createProgram()
-}
+const createProgram = (gl: WebGL2RenderingContext): WebGLProgram => gl.createProgram()
 
 const initializeProgram = (
   gl: WebGL2RenderingContext,
@@ -171,8 +216,11 @@ const initializeProgram = (
     gl.attachShader(program, shader)
   }
   gl.linkProgram(program)
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+  const compiledSuccessfully: boolean = Boolean(gl.getProgramParameter(program, gl.LINK_STATUS))
+  if (!compiledSuccessfully) {
     gl.deleteProgram(program)
+    gl.deleteShader(vertexShader)
+    gl.deleteShader(fragmentShader)
     const errorMessage: string = gl.getProgramInfoLog(program) || 'Unknown error'
     return E.left(new Error(`Error while linking the program: ${errorMessage}`))
   }
@@ -183,7 +231,7 @@ const initializeProgram = (
 console.log('Starting application');
 
 (async () => {
-  const applicationCanvas: HTMLCanvasElement | null = pipe(
+  const applicationCanvas: HTMLCanvasElement = pipe(
     getApplicationCanvas(),
     O.match(
       () => { throw new Error('Application canvas not found') },
@@ -191,10 +239,13 @@ console.log('Starting application');
     )
   )
 
-  const gl: WebGL2RenderingContext | null = E.match(
-    (error: Error) => { throw error },
-    (gl: WebGL2RenderingContext) => gl
-  )(createGraphicLibraryContext(applicationCanvas))
+  const gl: WebGL2RenderingContext = pipe(
+    createGraphicLibraryContext(applicationCanvas),
+    E.match(
+      (error: Error) => { throw error },
+      (gl: WebGL2RenderingContext) => gl
+    )
+  )
 
   const vertexShader: WebGLShader = pipe(
     createVertexShader(gl),
@@ -213,8 +264,6 @@ console.log('Starting application');
       (fragmentShader: WebGLShader) => fragmentShader
     )
   )
-
-  gl.enable(gl.DEPTH_TEST)
 
   const program: WebGLProgram = pipe(
     createProgram(gl),
@@ -257,7 +306,13 @@ console.log('Starting application');
 
   // I wanna run this first, before everything else, but I'll leave it here for now
 
-  await gl.makeXRCompatible()
+  const createXRSystem: () => E.Either<Error, XRSystem> = () => {
+    const xr = navigator.xr
+    if (!xr) {
+      return E.left(new Error('WebXR not supported'))
+    }
+    return E.right(xr)
+  }
 
   const xr: XRSystem | undefined = navigator.xr
   if (!xr) {
@@ -265,58 +320,51 @@ console.log('Starting application');
     return
   }
 
-  const isWebXRSupported: boolean = await xr.isSessionSupported('immersive-ar')
-  if (!isWebXRSupported) {
+  // I want to write a functional wrapper that takes this promise and resolves the boolean, my goal is to retunr an error if there is no support or of there is an error
+  const isWebXRSessionModeSupported: (xr: XRSystem, sessionMode: XRSessionMode) => TE.TaskEither<Error, boolean> = (
+    xr: XRSystem,
+    sessionMode: XRSessionMode
+  ): TE.TaskEither<Error, boolean> => () => xr.isSessionSupported(sessionMode).then(
+    (supported: boolean) => E.right<Error, boolean>(supported),
+    (error: Error) => E.left<Error, boolean>(error)
+  )
+
+  const webXRSessionModeSupported: boolean = await xr.isSessionSupported('immersive-ar')
+  if (!webXRSessionModeSupported) {
     console.error('WebXR not supported')
     return
   }
 
+  await gl.makeXRCompatible()
+
   // Application core
   // MAKE IT WORK MAKE IT RIGHT MAKE IT FAST
 
-  const CUBE = [
-    -0.1, -0.1, 0.1,
-    0.1, -0.1, 0.1,
-    0.1, 0.1, 0.1,
-    -0.1, -0.1, 0.1,
-    0.1, 0.1, 0.1,
-    -0.1, 0.1, 0.1,
+  type Position = [number, number, number]
+  type Rotation = [number, number, number]
+  type Scale = [number, number, number]
 
-    0.1, -0.1, -0.1,
-    -0.1, -0.1, -0.1,
-    -0.1, 0.1, -0.1,
-    0.1, -0.1, -0.1,
-    -0.1, 0.1, -0.1,
-    0.1, 0.1, -0.1,
+  type Model = {
+    id: string,
+    geometryId: string,
+    position: Position,
+    rotation: Rotation,
+    scale: Scale
+  }
 
-    0.1, -0.1, 0.1,
-    0.1, -0.1, -0.1,
-    0.1, 0.1, -0.1,
-    0.1, -0.1, 0.1,
-    0.1, 0.1, -0.1,
-    0.1, 0.1, 0.1,
+  type Geometry = {
+    id: string,
+    vertices: Float32Array,
+    indices?: Uint16Array,
+    primitiveType: 'points' | 'lines' | 'triangles'
+  }
 
-    -0.1, -0.1, -0.1,
-    -0.1, -0.1, 0.1,
-    -0.1, 0.1, 0.1,
-    -0.1, -0.1, -0.1,
-    -0.1, 0.1, 0.1,
-    -0.1, 0.1, -0.1,
+  type Scene = {
+    models: Model[],
+    geometries: Geometry[]
+  }
 
-    -0.1, 0.1, 0.1,
-    0.1, 0.1, 0.1,
-    0.1, 0.1, -0.1,
-    -0.1, 0.1, 0.1,
-    0.1, 0.1, -0.1,
-    -0.1, 0.1, -0.1,
-
-    -0.1, -0.1, -0.1,
-    0.1, -0.1, -0.1,
-    0.1, -0.1, 0.1,
-    -0.1, -0.1, -0.1,
-    0.1, -0.1, 0.1,
-    -0.1, -0.1, 0.1
-  ];
+  // ...
 
   const cubeVAO: WebGLVertexArrayObject = gl.createVertexArray()
   const cubeBuffer: WebGLBuffer = gl.createBuffer()
@@ -324,7 +372,7 @@ console.log('Starting application');
   gl.bindVertexArray(cubeVAO)
   gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer)
 
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(CUBE), gl.STATIC_DRAW)
+  gl.bufferData(gl.ARRAY_BUFFER, CUBE_VERTICES, gl.STATIC_DRAW)
 
   gl.vertexAttribPointer(positionLocation, BASE_NUMBER_OF_DIMENSIONS, gl.FLOAT, false, 0, 0)
   gl.enableVertexAttribArray(positionLocation)
@@ -527,7 +575,7 @@ console.log('Starting application');
         // For each model take the corresponding matrices and multiply them here, then pass the resulting matrix to the shader and render the model
         // CODE
         gl.bindVertexArray(cubeVAO)
-        gl.drawArrays(gl.POINTS, 0, CUBE.length / BASE_NUMBER_OF_DIMENSIONS)
+        gl.drawArrays(gl.POINTS, 0, CUBE_VERTICES.length / BASE_NUMBER_OF_DIMENSIONS)
       }
 
       xrSession.requestAnimationFrame(onXRFrame)
