@@ -283,7 +283,7 @@ length = go 0
 
 For real-time applications (XR at 90fps):
 
-| Budget | Time |
+| Phase | Time |
 |---|---|
 | Total frame | 11.1ms |
 | Input reading | ~1ms |

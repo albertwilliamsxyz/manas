@@ -96,7 +96,8 @@ data Maybe a = Nothing | Just a
 
 head :: forall a. Array a -> Maybe a
 head [] = Nothing
-head xs = Just (unsafePartial (Array.unsafeIndex xs 0))
+head xs = Just (Array.unsafeIndex xs 0)
+-- Safe here: the empty case is already handled above
 
 -- Using Maybe
 greet :: Maybe String -> String
