@@ -2,10 +2,18 @@ package:
   name: manas
   dependencies:
     - aff
+    - aff-promise
+    - arraybuffer
+    - arraybuffer-types
     - console
     - effect
+    - either
+    - exceptions
     - maybe
     - prelude
+    - refs
+    - web-dom
+    - web-html
   test:
     main: Test.Main
     dependencies: []

@@ -6,3 +6,4 @@
 .dev-key.pem
 .dev-cert.pem
 .pcs-ide-port
+*.session

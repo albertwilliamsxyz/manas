@@ -9,7 +9,6 @@
   },
   "scripts": {
     "build": "spago bundle --module Main --outfile dist/main.js --platform browser",
-    "dev": "spago bundle --module Main --outfile dist/main.js --platform browser --watch",
     "serve": "npx --yes serve . -p 3000",
     "serve:https": "node serve-https.mjs"
   },
