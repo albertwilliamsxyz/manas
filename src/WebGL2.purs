@@ -12,6 +12,10 @@ import Web.HTML.HTMLCanvasElement (HTMLCanvasElement)
 foreign import data Float32Array :: Type
 foreign import float32Array :: forall a. a -> Float32Array
 
+foreign import data Uint16Array :: Type
+foreign import uint16Array :: forall a. a -> Uint16Array
+
+
 foreign import data RenderingContext :: Type
 foreign import createContext
     :: HTMLCanvasElement -> Effect (Nullable RenderingContext)
@@ -123,6 +127,8 @@ isWebXRSessionModeSupported xrSystem mode = toAffE $ isWebXRSessionModeSupported
 type DrawUsage = Int
 staticDraw :: DrawUsage
 staticDraw = 0x88E4
+dynamicDraw :: DrawUsage
+dynamicDraw = 0x88E8
 
 float :: Int
 float = 0x1406

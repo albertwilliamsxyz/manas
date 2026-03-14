@@ -3,6 +3,7 @@ module Main where
 import Prelude
 
 import Control.Monad.Except (except, runExceptT)
+import Data.Array (replicate)
 import Data.Either (Either(..), note)
 import Data.Map (Map, fromFoldable)
 import Data.Maybe (fromMaybe)
@@ -164,8 +165,10 @@ main = launchAff_ do
         applicationCanvas <- except $ note "applicationCanvas not found" maybeApplicationCanvas
         applicationCanvasAsElement <- except $ note "applicationCanvas could not be converted to HTMLCanvasElement" (HTMLCanvasElement.fromElement applicationCanvas)
 
+
         nullableWebGL2Context <- liftEffect $ WebGL2.createContext applicationCanvasAsElement
         webGL2Context <- except $ note "WebGL2 not supported" (toMaybe nullableWebGL2Context)
+
 
         nullableVertexShader <- liftEffect $ WebGL2.createShader webGL2Context WebGL2.vertexShader        
         vertexShader <- except $ note "Vertex shader could not be created" (toMaybe nullableVertexShader)
@@ -179,6 +182,7 @@ main = launchAff_ do
                 except $ Left $ fromMaybe "Unknown Error when compiling vertex shader" (toMaybe nullableErrorMessage)
             else do
                 except $ Right "Vertex shader compiled successfully"
+
                 
         nullableFragmentShader <- liftEffect $ WebGL2.createShader webGL2Context WebGL2.fragmentShader
         fragmentShader <- except $ note "Fragment shader could not be created" (toMaybe nullableFragmentShader)
@@ -193,14 +197,14 @@ main = launchAff_ do
             else do
                 except $ Right "Fragment shader compiled successfully"
 
+
         nullableProgram <- liftEffect $ WebGL2.createProgram webGL2Context
         program <- except $ note "Program could not be created" (toMaybe nullableProgram)
 
+
         liftEffect $ WebGL2.attachShader webGL2Context program vertexShader
         liftEffect $ WebGL2.attachShader webGL2Context program fragmentShader
-
         liftEffect $ WebGL2.linkProgram webGL2Context program
-        
         programCompiledSuccessfully <- liftEffect $ WebGL2.getProgramParameter webGL2Context program WebGL2.linkStatus
         _ <- if not programCompiledSuccessfully
             then do
@@ -212,6 +216,7 @@ main = launchAff_ do
             else do
                 liftEffect $ WebGL2.useProgram webGL2Context program
                 except $ Right "Program created successfully"
+
 
         positionLocation <- liftEffect $ WebGL2.getAttribLocation webGL2Context program "a_position"
         _ <- if positionLocation == -1
@@ -234,6 +239,7 @@ main = launchAff_ do
         colorLocation <- except $ note "Unable to get the location of the color uniform" (toMaybe nullableColorLocation)
         liftEffect $ WebGL2.uniform4fv webGL2Context colorLocation (WebGL2.float32Array [0.0, 0.8, 0.0, 1.0])
 
+
         nullableXRSystem <- liftEffect $ WebGL2.getXRSystem nav
         xrSystem <- except $ note "WebXR not supported" (toMaybe nullableXRSystem)
 
@@ -243,6 +249,7 @@ main = launchAff_ do
             else except $ Right "WebXR session mode supported"
 
         liftAff $ WebGL2.makeXRCompatible webGL2Context
+        
 
         -- let cubePosition = WebGL2.float32Array [0.0, 0.0, -0.5]
         -- let cubeRotation = WebGL2.float32Array [0.0, 0.0, 0.0]
@@ -257,70 +264,54 @@ main = launchAff_ do
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
 
-        -- const handSkeletonJointIndicesBuffer: WebGLBuffer = gl.createBuffer()
-        -- gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, handSkeletonJointIndicesBuffer)
-        -- gl.bufferData(
-        --   gl.ELEMENT_ARRAY_BUFFER,
-        --   new Uint16Array(HAND_SKELETON_BY_JOINT_INDICES),
-        --   gl.STATIC_DRAW
-        -- )
-        --
-        -- // Left hand
-        --
-        -- const leftHandVAO: WebGLVertexArrayObject = gl.createVertexArray()
-        -- const leftHandBuffer: WebGLBuffer = gl.createBuffer()
-        --
-        -- gl.bindVertexArray(leftHandVAO)
-        -- gl.bindBuffer(gl.ARRAY_BUFFER, leftHandBuffer)
-        --
-        -- gl.bufferData(
-        --   gl.ARRAY_BUFFER,
-        --   new Float32Array(new Array(NUMBER_OF_HAND_JOINT_DIMENSIONS).fill(0)),
-        --   gl.DYNAMIC_DRAW
-        -- )
-        --
-        -- gl.vertexAttribPointer(positionLocation, BASE_NUMBER_OF_DIMENSIONS, gl.FLOAT, false, 0, 0)
-        -- gl.enableVertexAttribArray(positionLocation)
-        --
-        -- // Left hand skeleton
-        --
-        -- const leftHandSkeletonVAO: WebGLVertexArrayObject = gl.createVertexArray()
-        -- gl.bindVertexArray(leftHandSkeletonVAO)
-        -- gl.bindBuffer(gl.ARRAY_BUFFER, leftHandBuffer)
-        --
-        -- gl.vertexAttribPointer(positionLocation, BASE_NUMBER_OF_DIMENSIONS, gl.FLOAT, false, 0, 0)
-        -- gl.enableVertexAttribArray(positionLocation)
-        --
-        -- gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, handSkeletonJointIndicesBuffer)
-        --
-        -- // Right hand
-        --
-        -- const rightHandVAO: WebGLVertexArrayObject = gl.createVertexArray()
-        -- const rightHandBuffer: WebGLBuffer = gl.createBuffer()
-        --
-        -- gl.bindVertexArray(rightHandVAO)
-        -- gl.bindBuffer(gl.ARRAY_BUFFER, rightHandBuffer)
-        --
-        -- gl.bufferData(
-        --   gl.ARRAY_BUFFER,
-        --   new Float32Array(new Array(NUMBER_OF_HAND_JOINT_DIMENSIONS).fill(0)),
-        --   gl.DYNAMIC_DRAW
-        -- )
-        --
-        -- gl.vertexAttribPointer(positionLocation, BASE_NUMBER_OF_DIMENSIONS, gl.FLOAT, false, 0, 0)
-        -- gl.enableVertexAttribArray(positionLocation)
-        --
-        -- // Right hand skeleton
-        --
-        -- const rightHandSkeletonVAO: WebGLVertexArrayObject = gl.createVertexArray()
-        -- gl.bindVertexArray(rightHandSkeletonVAO)
-        -- gl.bindBuffer(gl.ARRAY_BUFFER, rightHandBuffer)
-        --
-        -- gl.vertexAttribPointer(positionLocation, BASE_NUMBER_OF_DIMENSIONS, gl.FLOAT, false, 0, 0)
-        -- gl.enableVertexAttribArray(positionLocation)
-        --
-        -- gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, handSkeletonJointIndicesBuffer)
 
+        nullableHandSkeletonJointIndicesBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
+        handSkeletonJointIndicesBuffer <- except $ note "Hand skeleton joint indices buffer could not be created" (toMaybe nullableHandSkeletonJointIndicesBuffer)
+        liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
+        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (WebGL2.uint16Array handSkeletonByJointIndices) WebGL2.staticDraw
+
+
+        nullableLeftHandVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
+        leftHandVAO <- except $ note "Left hand VAO could not be created" (toMaybe nullableLeftHandVAO)
+        nullableLeftHandBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
+        leftHandBuffer <- except $ note "Left hand buffer could not be created" (toMaybe nullableLeftHandBuffer)
+        liftEffect $ WebGL2.bindVertexArray webGL2Context leftHandVAO
+        liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer leftHandBuffer
+        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (
+            WebGL2.float32Array (replicate (numberOfJointsPerHand * baseNumberOfDimensions) 0.0)
+        ) WebGL2.dynamicDraw
+        liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
+        liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
+
+        nullableLeftHandSkeletonVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
+        leftHandSkeletonVAO <- except $ note "Left hand skeleton VAO could not be created" (toMaybe nullableLeftHandSkeletonVAO)
+        liftEffect $ WebGL2.bindVertexArray webGL2Context leftHandSkeletonVAO
+        liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer leftHandBuffer
+        liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
+        liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
+        liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
+
+
+        nullableRightHandVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
+        rightHandVAO <- except $ note "Right hand VAO could not be created" (toMaybe nullableRightHandVAO)
+        nullableRightHandBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
+        rightHandBuffer <- except $ note "Right hand buffer could not be created" (toMaybe nullableRightHandBuffer)
+        liftEffect $ WebGL2.bindVertexArray webGL2Context rightHandVAO
+        liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer rightHandBuffer
+        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (
+            WebGL2.float32Array (replicate (numberOfJointsPerHand * baseNumberOfDimensions) 0.0)
+        ) WebGL2.dynamicDraw
+        liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
+        liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
+
+        nullableRightHandSkeletonVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
+        rightHandSkeletonVAO <- except $ note "Right hand skeleton VAO could not be created" (toMaybe nullableRightHandSkeletonVAO)
+        liftEffect $ WebGL2.bindVertexArray webGL2Context rightHandSkeletonVAO
+        liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer rightHandBuffer
+        liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
+        liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
+        liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
+        except $ Right "Buffers and VAOs created successfully"
     liftEffect $ case result of
         Left errorMessage -> log errorMessage
         Right message -> log message

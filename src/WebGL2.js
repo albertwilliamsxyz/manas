@@ -1,4 +1,6 @@
 export const float32Array = (arr) => new Float32Array(arr);
+export const uint16Array = (arr) => new Uint16Array(arr);
+
 
 export const createContext = (canvas) => () => canvas.getContext('webgl2');
 
