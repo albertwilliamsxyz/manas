@@ -4,17 +4,128 @@ import Prelude
 
 import Control.Monad.Except (except, runExceptT)
 import Data.Either (Either(..), note)
+import Data.Map (Map, fromFoldable)
 import Data.Maybe (fromMaybe)
 import Data.Nullable (toMaybe)
+import Data.Tuple (Tuple(..))
 import Effect (Effect)
+import Effect.Aff (launchAff_)
+import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
 import Web.DOM.NonElementParentNode (getElementById)
 import Web.HTML (window)
 import Web.HTML.HTMLCanvasElement as HTMLCanvasElement
 import Web.HTML.HTMLDocument as HTMLDocument
-import Web.HTML.Window (document)
+import Web.HTML.Window (document, navigator)
 import WebGL2 as WebGL2
+
+baseNumberOfDimensions :: Int
+baseNumberOfDimensions = 3
+
+
+numberOfJointsPerHand :: Int
+numberOfJointsPerHand = 25
+
+numberOfHandJointDimensions :: Int
+numberOfHandJointDimensions = numberOfJointsPerHand * baseNumberOfDimensions
+
+handSkeletonByJointIndices :: Array Int
+handSkeletonByJointIndices =
+  [ 0, 1, 1, 2, 2, 3, 3, 4
+  , 0, 5, 5, 6, 6, 7, 7, 8, 8, 9
+  , 0, 10, 10, 11, 11, 12, 12, 13, 13, 14
+  , 0, 15, 15, 16, 16, 17, 17, 18, 18, 19
+  , 0, 20, 20, 21, 21, 22, 22, 23, 23, 24
+  ]
+
+handJointIndicesByName :: Map String Int
+handJointIndicesByName =
+  fromFoldable
+    [ Tuple "wrist" 0
+    , Tuple "thumb-metacarpal" 1
+    , Tuple "thumb-phalanx-proximal" 2
+    , Tuple "thumb-phalanx-distal" 3
+    , Tuple "thumb-tip" 4
+    , Tuple "index-finger-metacarpal" 5
+    , Tuple "index-finger-phalanx-proximal" 6
+    , Tuple "index-finger-phalanx-intermediate" 7
+    , Tuple "index-finger-phalanx-distal" 8
+    , Tuple "index-finger-tip" 9
+    , Tuple "middle-finger-metacarpal" 10
+    , Tuple "middle-finger-phalanx-proximal" 11
+    , Tuple "middle-finger-phalanx-intermediate" 12
+    , Tuple "middle-finger-phalanx-distal" 13
+    , Tuple "middle-finger-tip" 14
+    , Tuple "ring-finger-metacarpal" 15
+    , Tuple "ring-finger-phalanx-proximal" 16
+    , Tuple "ring-finger-phalanx-intermediate" 17
+    , Tuple "ring-finger-phalanx-distal" 18
+    , Tuple "ring-finger-tip" 19
+    , Tuple "pinky-finger-metacarpal" 20
+    , Tuple "pinky-finger-phalanx-proximal" 21
+    , Tuple "pinky-finger-phalanx-intermediate" 22
+    , Tuple "pinky-finger-phalanx-distal" 23
+    , Tuple "pinky-finger-tip" 24
+    ]
+
+cubeVertices3d :: Array Number
+cubeVertices3d =
+  [ -0.1, -0.1, 0.1
+  ,  0.1, -0.1, 0.1
+  ,  0.1,  0.1, 0.1
+  , -0.1, -0.1, 0.1
+  ,  0.1,  0.1, 0.1
+  , -0.1,  0.1, 0.1
+
+  ,  0.1, -0.1, -0.1
+  , -0.1, -0.1, -0.1
+  , -0.1,  0.1, -0.1
+  ,  0.1, -0.1, -0.1
+  , -0.1,  0.1, -0.1
+  ,  0.1,  0.1, -0.1
+
+  ,  0.1, -0.1, 0.1
+  ,  0.1, -0.1, -0.1
+  ,  0.1,  0.1, -0.1
+  ,  0.1, -0.1, 0.1
+  ,  0.1,  0.1, -0.1
+  ,  0.1,  0.1, 0.1
+
+  , -0.1, -0.1, -0.1
+  , -0.1, -0.1, 0.1
+  , -0.1,  0.1, 0.1
+  , -0.1, -0.1, -0.1
+  , -0.1,  0.1, 0.1
+  , -0.1,  0.1, -0.1
+
+  , -0.1,  0.1, 0.1
+  ,  0.1,  0.1, 0.1
+  ,  0.1,  0.1, -0.1
+  , -0.1,  0.1, 0.1
+  ,  0.1,  0.1, -0.1
+  , -0.1,  0.1, -0.1
+
+  , -0.1, -0.1, -0.1
+  ,  0.1, -0.1, -0.1
+  ,  0.1, -0.1, 0.1
+  , -0.1, -0.1, -0.1
+  ,  0.1, -0.1, 0.1
+  , -0.1, -0.1, 0.1
+  ]
+
+
+identityMatrix4x4 :: Array Number
+identityMatrix4x4 =
+  [ 1.0, 0.0, 0.0, 0.0
+  , 0.0, 1.0, 0.0, 0.0
+  , 0.0, 0.0, 1.0, 0.0
+  , 0.0, 0.0, 0.0, 1.0
+  ]
+
+identityMatrix4x4Float32 :: WebGL2.Float32Array
+identityMatrix4x4Float32 = WebGL2.float32Array identityMatrix4x4
+
 
 glslVersionDirective :: String
 glslVersionDirective = "#version 300 es"
@@ -41,11 +152,14 @@ void main() {
 }
 """
 
+
 main :: Effect Unit
-main = do
-    win <- window
-    doc <- document win
+main = launchAff_ do
     result <- runExceptT do
+        win <- liftEffect window
+        doc <- liftEffect $ document win
+        nav <- liftEffect $ navigator win
+
         maybeApplicationCanvas <- liftEffect $ getElementById "application" (HTMLDocument.toNonElementParentNode doc)
         applicationCanvas <- except $ note "applicationCanvas not found" maybeApplicationCanvas
         applicationCanvasAsElement <- except $ note "applicationCanvas could not be converted to HTMLCanvasElement" (HTMLCanvasElement.fromElement applicationCanvas)
@@ -88,7 +202,7 @@ main = do
         liftEffect $ WebGL2.linkProgram webGL2Context program
         
         programCompiledSuccessfully <- liftEffect $ WebGL2.getProgramParameter webGL2Context program WebGL2.linkStatus
-        if not programCompiledSuccessfully
+        _ <- if not programCompiledSuccessfully
             then do
                 nullableErrorMessage <- liftEffect $ WebGL2.getProgramInfoLog webGL2Context program
                 liftEffect $ WebGL2.deleteShader webGL2Context vertexShader
@@ -98,6 +212,115 @@ main = do
             else do
                 liftEffect $ WebGL2.useProgram webGL2Context program
                 except $ Right "Program created successfully"
-    case result of
+
+        positionLocation <- liftEffect $ WebGL2.getAttribLocation webGL2Context program "a_position"
+        _ <- if positionLocation == -1
+            then except $ Left "Unable to get the location of the position attribute"
+            else except $ Right "Position attribute location obtained successfully"
+
+        nullableProjectionLocation <- liftEffect $ WebGL2.getUniformLocation webGL2Context program "u_projection"
+        projectionLocation <- except $ note "Unable to get the location of the projection uniform" (toMaybe nullableProjectionLocation)
+        liftEffect $ WebGL2.uniformMatrix4fv webGL2Context projectionLocation false identityMatrix4x4Float32
+
+        nullableViewLocation <- liftEffect $ WebGL2.getUniformLocation webGL2Context program "u_view"
+        viewLocation <- except $ note "Unable to get the location of the view uniform" (toMaybe nullableViewLocation)
+        liftEffect $ WebGL2.uniformMatrix4fv webGL2Context viewLocation false identityMatrix4x4Float32
+
+        nullableModelLocation <- liftEffect $ WebGL2.getUniformLocation webGL2Context program "u_model"
+        modelLocation <- except $ note "Unable to get the location of the model uniform" (toMaybe nullableModelLocation)
+        liftEffect $ WebGL2.uniformMatrix4fv webGL2Context modelLocation false identityMatrix4x4Float32
+
+        nullableColorLocation <- liftEffect $ WebGL2.getUniformLocation webGL2Context program "u_color"
+        colorLocation <- except $ note "Unable to get the location of the color uniform" (toMaybe nullableColorLocation)
+        liftEffect $ WebGL2.uniform4fv webGL2Context colorLocation (WebGL2.float32Array [0.0, 0.8, 0.0, 1.0])
+
+        nullableXRSystem <- liftEffect $ WebGL2.getXRSystem nav
+        xrSystem <- except $ note "WebXR not supported" (toMaybe nullableXRSystem)
+
+        isWebXRSessionModeSupported <- liftAff $ WebGL2.isWebXRSessionModeSupported xrSystem "immersive-ar"
+        _ <- if not isWebXRSessionModeSupported
+            then except $ Left "WebXR session mode not supported"
+            else except $ Right "WebXR session mode supported"
+
+        liftAff $ WebGL2.makeXRCompatible webGL2Context
+
+        -- let cubePosition = WebGL2.float32Array [0.0, 0.0, -0.5]
+        -- let cubeRotation = WebGL2.float32Array [0.0, 0.0, 0.0]
+        -- let cubeScale = WebGL2.float32Array [1.0, 1.0, 1.0]
+        nullableCubeVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
+        cubeVAO <- except $ note "Cube VAO could not be created" (toMaybe nullableCubeVAO)
+        nullableCubeBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
+        cubeBuffer <- except $ note "Cube buffer could not be created" (toMaybe nullableCubeBuffer)
+        liftEffect $ WebGL2.bindVertexArray webGL2Context cubeVAO
+        liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer cubeBuffer
+        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (WebGL2.float32Array [0.0, 0.0, 0.0]) WebGL2.staticDraw
+        liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
+        liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
+
+        -- const handSkeletonJointIndicesBuffer: WebGLBuffer = gl.createBuffer()
+        -- gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, handSkeletonJointIndicesBuffer)
+        -- gl.bufferData(
+        --   gl.ELEMENT_ARRAY_BUFFER,
+        --   new Uint16Array(HAND_SKELETON_BY_JOINT_INDICES),
+        --   gl.STATIC_DRAW
+        -- )
+        --
+        -- // Left hand
+        --
+        -- const leftHandVAO: WebGLVertexArrayObject = gl.createVertexArray()
+        -- const leftHandBuffer: WebGLBuffer = gl.createBuffer()
+        --
+        -- gl.bindVertexArray(leftHandVAO)
+        -- gl.bindBuffer(gl.ARRAY_BUFFER, leftHandBuffer)
+        --
+        -- gl.bufferData(
+        --   gl.ARRAY_BUFFER,
+        --   new Float32Array(new Array(NUMBER_OF_HAND_JOINT_DIMENSIONS).fill(0)),
+        --   gl.DYNAMIC_DRAW
+        -- )
+        --
+        -- gl.vertexAttribPointer(positionLocation, BASE_NUMBER_OF_DIMENSIONS, gl.FLOAT, false, 0, 0)
+        -- gl.enableVertexAttribArray(positionLocation)
+        --
+        -- // Left hand skeleton
+        --
+        -- const leftHandSkeletonVAO: WebGLVertexArrayObject = gl.createVertexArray()
+        -- gl.bindVertexArray(leftHandSkeletonVAO)
+        -- gl.bindBuffer(gl.ARRAY_BUFFER, leftHandBuffer)
+        --
+        -- gl.vertexAttribPointer(positionLocation, BASE_NUMBER_OF_DIMENSIONS, gl.FLOAT, false, 0, 0)
+        -- gl.enableVertexAttribArray(positionLocation)
+        --
+        -- gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, handSkeletonJointIndicesBuffer)
+        --
+        -- // Right hand
+        --
+        -- const rightHandVAO: WebGLVertexArrayObject = gl.createVertexArray()
+        -- const rightHandBuffer: WebGLBuffer = gl.createBuffer()
+        --
+        -- gl.bindVertexArray(rightHandVAO)
+        -- gl.bindBuffer(gl.ARRAY_BUFFER, rightHandBuffer)
+        --
+        -- gl.bufferData(
+        --   gl.ARRAY_BUFFER,
+        --   new Float32Array(new Array(NUMBER_OF_HAND_JOINT_DIMENSIONS).fill(0)),
+        --   gl.DYNAMIC_DRAW
+        -- )
+        --
+        -- gl.vertexAttribPointer(positionLocation, BASE_NUMBER_OF_DIMENSIONS, gl.FLOAT, false, 0, 0)
+        -- gl.enableVertexAttribArray(positionLocation)
+        --
+        -- // Right hand skeleton
+        --
+        -- const rightHandSkeletonVAO: WebGLVertexArrayObject = gl.createVertexArray()
+        -- gl.bindVertexArray(rightHandSkeletonVAO)
+        -- gl.bindBuffer(gl.ARRAY_BUFFER, rightHandBuffer)
+        --
+        -- gl.vertexAttribPointer(positionLocation, BASE_NUMBER_OF_DIMENSIONS, gl.FLOAT, false, 0, 0)
+        -- gl.enableVertexAttribArray(positionLocation)
+        --
+        -- gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, handSkeletonJointIndicesBuffer)
+
+    liftEffect $ case result of
         Left errorMessage -> log errorMessage
         Right message -> log message
