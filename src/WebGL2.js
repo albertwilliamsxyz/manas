@@ -33,8 +33,5 @@ export const bufferData = (gl) => (target) => (data) => (usage) => () => gl.buff
 export const vertexAttribPointer = (gl) => (index) => (size) => (type) => (normalized) => (stride) => (offset) => () => gl.vertexAttribPointer(index, size, type, normalized, stride, offset);
 export const enableVertexAttribArray = (gl) => (index) => () => gl.enableVertexAttribArray(index);
 
-export const getXRSystem = (navigator) => () => navigator.xr;
-export const isWebXRSessionModeSupportedImpl = (xr) => (mode) => () => xr.isSessionSupported(mode);
-export const makeXRCompatibleImpl = (gl) => () => gl.makeXRCompatible();
-
+export const enable = (gl) => (cap) => () => gl.enable(cap);
 

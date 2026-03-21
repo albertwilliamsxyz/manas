@@ -2,10 +2,8 @@ module WebGL2 where
 
 import Prelude
 
-import Control.Promise (Promise, toAffE)
 import Data.Nullable (Nullable)
 import Effect (Effect)
-import Effect.Aff (Aff)
 import Web.HTML.HTMLCanvasElement (HTMLCanvasElement)
 
 
@@ -112,18 +110,6 @@ foreign import enableVertexAttribArray
     :: RenderingContext -> Int -> Effect Unit
 
 
-foreign import data XRSystem :: Type
-
-foreign import getXRSystem :: forall a. a -> Effect (Nullable XRSystem)
-foreign import makeXRCompatibleImpl :: RenderingContext -> Effect (Promise Unit)
-makeXRCompatible :: RenderingContext -> Aff Unit
-makeXRCompatible context = toAffE $ makeXRCompatibleImpl context
-
-foreign import isWebXRSessionModeSupportedImpl :: XRSystem -> String -> Effect (Promise Boolean)
-isWebXRSessionModeSupported :: XRSystem -> String -> Aff Boolean
-isWebXRSessionModeSupported xrSystem mode = toAffE $ isWebXRSessionModeSupportedImpl xrSystem mode
-
-
 type DrawUsage = Int
 staticDraw :: DrawUsage
 staticDraw = 0x88E4
@@ -132,3 +118,9 @@ dynamicDraw = 0x88E8
 
 float :: Int
 float = 0x1406
+
+depthTest :: Int
+depthTest = 0x0B71
+
+foreign import enable :: RenderingContext -> Int -> Effect Unit
+
