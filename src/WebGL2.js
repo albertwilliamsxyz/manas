@@ -1,7 +1,3 @@
-export const float32Array = (arr) => new Float32Array(arr);
-export const uint16Array = (arr) => new Uint16Array(arr);
-
-
 export const createContext = (canvas) => () => canvas.getContext('webgl2');
 
 export const createShader = (gl) => (type) => () => gl.createShader(type);
@@ -33,5 +29,18 @@ export const bufferData = (gl) => (target) => (data) => (usage) => () => gl.buff
 export const vertexAttribPointer = (gl) => (index) => (size) => (type) => (normalized) => (stride) => (offset) => () => gl.vertexAttribPointer(index, size, type, normalized, stride, offset);
 export const enableVertexAttribArray = (gl) => (index) => () => gl.enableVertexAttribArray(index);
 
-export const enable = (gl) => (cap) => () => gl.enable(cap);
+export const enable = (gl) => (capability) => () => gl.enable(capability);
 
+export const bufferSubData = (gl) => (target) => (offset) => (data) => () => gl.bufferSubData(target, offset, data);
+
+export const bindFramebuffer = (gl) => (target) => (framebuffer) => () => gl.bindFramebuffer(target, framebuffer);
+
+export const clearColor = (gl) => (r) => (g) => (b) => (a) => () => gl.clearColor(r, g, b, a);
+
+export const clear = (gl) => (mask) => () => gl.clear(mask);
+
+export const viewport = (gl) => (x) => (y) => (w) => (h) => () => gl.viewport(x, y, w, h);
+
+export const drawArrays = (gl) => (mode) => (first) => (count) => () => gl.drawArrays(mode, first, count);
+
+export const drawElements = (gl) => (mode) => (count) => (type) => (offset) => () => gl.drawElements(mode, count, type, offset);
