@@ -341,18 +341,13 @@ main = launchAff_ do
                 let tick :: WebXR.XRFrameRequestCallback
                     tick _ frame = do
                         result <- runExceptT do
-                            liftEffect $ log "Fetching input sources..."
                             inputSources <- liftEffect $ WebXR.getInputSources xrSession
-                            liftEffect $ log ("Input sources count: " <> show (length inputSources))
                             for_ inputSources \inputSource -> void $ runExceptT do
-                                liftEffect $ log "Processing input source..."
                                 nullableHand <- liftEffect $ WebXR.getHand inputSource
                                 hand <- except $ note "Input source has no hand data" (toMaybe nullableHand)
-                                liftEffect $ log "Hand data acquired"
 
                                 nullableHandedness <- liftEffect $ WebXR.getHandedness inputSource
                                 handedness <- except $ note "Handedness unknown" (toMaybe nullableHandedness)
-                                liftEffect $ log ("Handedness: " <> handedness)
 
                                 verticesReference <- case handedness of
                                     "left" -> pure leftHandVertices
@@ -360,9 +355,7 @@ main = launchAff_ do
                                     _ -> except $ Left ("Handedness unknown: " <> handedness)
 
                                 joints <- liftEffect $ WebXR.getHandJoints hand
-                                liftEffect $ log ("Joints count: " <> show (length joints))
                                 for_ joints \joint -> do
-                                    liftEffect $ log ("Processing joint: " <> joint.name)
                                     jointResult <- runExceptT do
                                         nullableJointPose <- liftEffect $ WebXR.getJointPose frame joint.space referenceSpace
                                         jointPose <- except $ note "No joint pose" (toMaybe nullableJointPose)
