@@ -3,7 +3,7 @@ module Main where
 import Prelude
 
 import Control.Monad.Except (except, runExceptT)
-import Data.Array (length, replicate)
+import Data.Array (length, replicate, take)
 import Data.Either (Either(..), note)
 import Data.Foldable (for_)
 import Data.Int.Bits ((.|.))
@@ -341,13 +341,18 @@ main = launchAff_ do
                 let tick :: WebXR.XRFrameRequestCallback
                     tick _ frame = do
                         result <- runExceptT do
+                            liftEffect $ log "Fetching input sources..."
                             inputSources <- liftEffect $ WebXR.getInputSources xrSession
+                            liftEffect $ log ("Input sources count: " <> show (length inputSources))
                             for_ inputSources \inputSource -> void $ runExceptT do
+                                liftEffect $ log "Processing input source..."
                                 nullableHand <- liftEffect $ WebXR.getHand inputSource
                                 hand <- except $ note "Input source has no hand data" (toMaybe nullableHand)
+                                liftEffect $ log "Hand data acquired"
 
                                 nullableHandedness <- liftEffect $ WebXR.getHandedness inputSource
                                 handedness <- except $ note "Handedness unknown" (toMaybe nullableHandedness)
+                                liftEffect $ log ("Handedness: " <> handedness)
 
                                 verticesReference <- case handedness of
                                     "left" -> pure leftHandVertices
@@ -355,17 +360,21 @@ main = launchAff_ do
                                     _ -> except $ Left ("Handedness unknown: " <> handedness)
 
                                 joints <- liftEffect $ WebXR.getHandJoints hand
-                                for_ joints \(Tuple jointName jointSpace) -> void $ runExceptT do
-                                    nullableJointPose <- liftEffect $ WebXR.getJointPose frame jointSpace referenceSpace
-                                    jointPose <- except $ note "No joint pose" (toMaybe nullableJointPose)
+                                liftEffect $ log ("Joints count: " <> show (length joints))
+                                for_ joints \joint -> do
+                                    liftEffect $ log ("Processing joint: " <> joint.name)
+                                    jointResult <- runExceptT do
+                                        nullableJointPose <- liftEffect $ WebXR.getJointPose frame joint.space referenceSpace
+                                        jointPose <- except $ note "No joint pose" (toMaybe nullableJointPose)
+                                        index <- except $ note ("Unknown joint name: " <> joint.name) (Map.lookup joint.name handJointIndicesByName)
+                                        positionArray <- liftEffect $ WebXR.getJointPosition jointPose
+                                        let offset = index * 3
+                                        liftEffect $ ForeignUtils.copyInto verticesReference positionArray offset
+                                    case jointResult of
+                                        Left err -> liftEffect $ log $ "Joint Loop Error (" <> joint.name <> "): " <> err
+                                        Right _ -> pure unit
 
-                                    index <- except $ note ("Unknown joint name: " <> jointName) (Map.lookup jointName handJointIndicesByName)
-
-                                    positionArray <- liftEffect $ WebXR.getJointPosition jointPose
-                                    let offset = index * 3
-                                    liftEffect $ ForeignUtils.copyInto verticesReference positionArray offset
-                                pure unit
-
+                            liftEffect $ log $ "leftHandVertices[0..2]: " <> show (take 3 (ForeignUtils.toArray leftHandVertices))
                             liftEffect $ WebGL2.bindBuffer xrWebGL2Context WebGL2.arrayBuffer leftHandBuffer
                             liftEffect $ WebGL2.bufferSubData xrWebGL2Context WebGL2.arrayBuffer 0 leftHandVertices
                             liftEffect $ WebGL2.bindBuffer xrWebGL2Context WebGL2.arrayBuffer rightHandBuffer
@@ -379,8 +388,8 @@ main = launchAff_ do
                             let leftThumbTipStart = leftThumbTipIndex * baseNumberOfDimensions
                             leftIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices leftIndexFingerTipStart (leftIndexFingerTipStart + baseNumberOfDimensions)
                             leftThumbTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices leftThumbTipStart (leftThumbTipStart + baseNumberOfDimensions)
-                            leftPinchDistance <- liftEffect $ ForeignUtils.get3DDistance leftIndexFingerTipPosition leftThumbTipPosition
-                            when (leftPinchDistance < 0.02) $ liftEffect $ log "Left hand pinch"
+                            _ <- liftEffect $ ForeignUtils.get3DDistance leftIndexFingerTipPosition leftThumbTipPosition
+                            -- when (leftPinchDistance < 0.02) $ liftEffect $ log "Left hand pinch"
 
                             let maybeRightIndexFingerTipIndex = Map.lookup "index-finger-tip" handJointIndicesByName
                             let maybeRightThumbTipIndex = Map.lookup "thumb-tip" handJointIndicesByName
@@ -390,13 +399,13 @@ main = launchAff_ do
                             let rightThumbTipStart = rightThumbTipIndex * baseNumberOfDimensions
                             rightIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices rightIndexFingerTipStart (rightIndexFingerTipStart + baseNumberOfDimensions)
                             rightThumbTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices rightThumbTipStart (rightThumbTipStart + baseNumberOfDimensions)
-                            rightPinchDistance <- liftEffect $ ForeignUtils.get3DDistance rightIndexFingerTipPosition rightThumbTipPosition
-                            when (rightPinchDistance < 0.02) $ liftEffect $ log "Right hand pinch"
+                            _ <- liftEffect $ ForeignUtils.get3DDistance rightIndexFingerTipPosition rightThumbTipPosition
+                            -- when (rightPinchDistance < 0.02) $ liftEffect $ log "Right hand pinch"
 
                             -- Always clear the framebuffer, even if tracking is lost
                             framebuffer <- liftEffect $ WebXR.getFramebuffer xrGLLayer
                             liftEffect $ WebGL2.bindFramebuffer xrWebGL2Context WebGL2.framebuffer framebuffer
-                            liftEffect $ WebGL2.clearColor xrWebGL2Context 0.0 0.0 0.0 0.3
+                            liftEffect $ WebGL2.clearColor xrWebGL2Context 0.0 0.0 0.0 1.0
                             liftEffect $ WebGL2.clear xrWebGL2Context (WebGL2.colorBufferBit .|. WebGL2.depthBufferBit)
 
                             nullableViewerPose <- liftEffect $ WebXR.getViewerPose frame referenceSpace
@@ -409,8 +418,8 @@ main = launchAff_ do
                                   viewport <- except $ note "no viewport" (toMaybe nullableViewport)
                                   liftEffect $ WebGL2.viewport xrWebGL2Context viewport.x viewport.y viewport.width viewport.height
 
-                                  projectionMatrix <- pure $ WebXR.getProjectionMatrix view
-                                  viewMatrix <- pure $ WebXR.getViewMatrix view
+                                  projectionMatrix <- liftEffect $ WebXR.getProjectionMatrix view
+                                  viewMatrix <- liftEffect $ WebXR.getViewMatrix view
                                   liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context projectionLocation false projectionMatrix
                                   liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context viewLocation false viewMatrix
                                   liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false identityMatrix4x4Float32

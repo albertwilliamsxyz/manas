@@ -33,7 +33,7 @@ export const getHand = (source) => () =>
 export const getHandedness = (source) => () =>
   (source && typeof source.handedness === "string") ? source.handedness : null;
 
-export const getHandJoints = (hand) => () => Array.from(hand.entries());
+export const getHandJoints = (hand) => () => Array.from(hand.entries()).map(([name, space]) => ({ name, space }));
 
 export const getJointPosition = (pose) => () => new Float32Array([pose.transform.position.x, pose.transform.position.y, pose.transform.position.z]);
 

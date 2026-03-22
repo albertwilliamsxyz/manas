@@ -4,7 +4,6 @@ import Prelude
 
 import Control.Promise (Promise, toAffE)
 import Data.Nullable (Nullable)
-import Data.Tuple (Tuple)
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Web.HTML (Navigator)
@@ -72,7 +71,7 @@ foreign import getHand :: XRInputSource -> Effect (Nullable XRHand)
 
 foreign import getHandedness :: XRInputSource -> Effect (Nullable String)
 
-foreign import getHandJoints :: XRHand -> Effect (Array (Tuple String XRJointSpace))
+foreign import getHandJoints :: XRHand -> Effect (Array { name :: String, space :: XRJointSpace })
 
 foreign import getJointPosition :: XRJointPose -> Effect ForeignUtils.Float32Array
 
@@ -89,9 +88,9 @@ foreign import getViews :: XRViewerPose -> Effect (Array XRView)
 foreign import getViewport :: XRWebGLLayer -> XRView -> Effect (Nullable XRViewport)
 
 
-foreign import getProjectionMatrix :: XRView -> ForeignUtils.Float32Array
+foreign import getProjectionMatrix :: XRView -> Effect ForeignUtils.Float32Array
 
-foreign import getViewMatrix :: XRView -> ForeignUtils.Float32Array
+foreign import getViewMatrix :: XRView -> Effect ForeignUtils.Float32Array
 
 foreign import data XRFramebuffer :: Type
 foreign import getFramebuffer :: XRWebGLLayer -> Effect XRFramebuffer

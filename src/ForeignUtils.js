@@ -10,3 +10,6 @@ export const subarray = (array) => (start) => (end) => () => array.subarray(star
 
 export const get3DDistance = (arrayA) => (arrayB) => () => Math.sqrt((arrayA[0] - arrayB[0]) ** 2 + (arrayA[1] - arrayB[1]) ** 2 + (arrayA[2] - arrayB[2]) ** 2);
 
+export const toArray = (typedArray) => Array.from(typedArray);
+
+

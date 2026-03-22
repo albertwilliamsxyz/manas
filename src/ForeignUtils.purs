@@ -21,4 +21,4 @@ foreign import subarray :: Float32Array -> Int -> Int -> Effect Float32Array
 
 foreign import get3DDistance :: Float32Array -> Float32Array -> Effect Number
 
-
+foreign import toArray :: Float32Array -> Array Number
