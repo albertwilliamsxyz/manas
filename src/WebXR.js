@@ -41,6 +41,10 @@ export const getViews = (pose) => () => Array.from(pose.views);
 
 export const getViewport = (layer) => (view) => () => layer.getViewport(view);
 
-export const getProjectionMatrix = (view) => () => view.projectionMatrix;
+export const getProjectionMatrix = (view) => () => new Float32Array(view.projectionMatrix);
 
-export const getViewMatrix = (view) => () => view.transform.inverse.matrix;
+export const getViewMatrix = (view) => () => new Float32Array(view.transform.inverse.matrix);
+
+
+export const getFramebuffer = (layer) => () => layer.framebuffer;
+

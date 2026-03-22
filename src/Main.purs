@@ -3,12 +3,13 @@ module Main where
 import Prelude
 
 import Control.Monad.Except (except, runExceptT)
-import Data.Array (replicate)
+import Data.Array (length, replicate)
 import Data.Either (Either(..), note)
 import Data.Foldable (for_)
-import Data.Map as Map
+import Data.Int.Bits ((.|.))
 import Data.Map (Map, fromFoldable)
-import Data.Maybe (fromMaybe)
+import Data.Map as Map
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Nullable (toMaybe)
 import Data.Tuple (Tuple(..))
 import Effect (Effect)
@@ -313,6 +314,129 @@ main = launchAff_ do
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
 
+        let runExperience :: Window -> Navigator -> WebGL2.RenderingContext -> Aff (Either String Unit)
+            runExperience xrWin xrNav xrWebGL2Context = runExceptT do
+                nullableXRSystem <- liftEffect $ WebXR.getXRSystem xrNav
+                xrSystem <- except $ note "WebXR not supported" (toMaybe nullableXRSystem)
+
+
+                isWebXRSessionModeSupported <- liftAff $ WebXR.isWebXRSessionModeSupported xrSystem "immersive-ar"
+                _ <- if not isWebXRSessionModeSupported
+                    then except $ Left "WebXR session mode not supported"
+                    else except $ Right "WebXR session mode supported"
+                liftAff $ WebXR.makeXRWebGL2Compatible xrWebGL2Context
+
+
+                xrSession <- liftAff $ WebXR.requestSession xrSystem "immersive-ar" { optionalFeatures: ["hit-test", "hand-tracking"] }
+                xrGLLayer <- liftEffect $ WebXR.createXRWebGLLayer xrWin xrSession xrWebGL2Context
+                liftEffect $ WebXR.updateRenderState xrSession { baseLayer: xrGLLayer }
+
+                referenceSpace <- liftAff $ WebXR.requestReferenceSpace xrSession "local"
+
+                -- let drawingVertices = ForeignUtils.float32Array (replicate (numberOfHandJointDimensions) 0.0)
+
+                let leftHandVertices = ForeignUtils.float32Array (replicate (numberOfHandJointDimensions) 0.0)
+                    rightHandVertices = ForeignUtils.float32Array (replicate (numberOfHandJointDimensions) 0.0)
+
+                let tick :: WebXR.XRFrameRequestCallback
+                    tick _ frame = do
+                        result <- runExceptT do
+                            inputSources <- liftEffect $ WebXR.getInputSources xrSession
+                            for_ inputSources \inputSource -> void $ runExceptT do
+                                nullableHand <- liftEffect $ WebXR.getHand inputSource
+                                hand <- except $ note "Input source has no hand data" (toMaybe nullableHand)
+
+                                nullableHandedness <- liftEffect $ WebXR.getHandedness inputSource
+                                handedness <- except $ note "Handedness unknown" (toMaybe nullableHandedness)
+
+                                verticesReference <- case handedness of
+                                    "left" -> pure leftHandVertices
+                                    "right" -> pure rightHandVertices
+                                    _ -> except $ Left ("Handedness unknown: " <> handedness)
+
+                                joints <- liftEffect $ WebXR.getHandJoints hand
+                                for_ joints \(Tuple jointName jointSpace) -> void $ runExceptT do
+                                    nullableJointPose <- liftEffect $ WebXR.getJointPose frame jointSpace referenceSpace
+                                    jointPose <- except $ note "No joint pose" (toMaybe nullableJointPose)
+
+                                    index <- except $ note ("Unknown joint name: " <> jointName) (Map.lookup jointName handJointIndicesByName)
+
+                                    positionArray <- liftEffect $ WebXR.getJointPosition jointPose
+                                    let offset = index * 3
+                                    liftEffect $ ForeignUtils.copyInto verticesReference positionArray offset
+                                pure unit
+
+                            liftEffect $ WebGL2.bindBuffer xrWebGL2Context WebGL2.arrayBuffer leftHandBuffer
+                            liftEffect $ WebGL2.bufferSubData xrWebGL2Context WebGL2.arrayBuffer 0 leftHandVertices
+                            liftEffect $ WebGL2.bindBuffer xrWebGL2Context WebGL2.arrayBuffer rightHandBuffer
+                            liftEffect $ WebGL2.bufferSubData xrWebGL2Context WebGL2.arrayBuffer 0 rightHandVertices
+
+                            let maybeLeftIndexFingerTipIndex = Map.lookup "index-finger-tip" handJointIndicesByName
+                            let maybeLeftThumbTipIndex = Map.lookup "thumb-tip" handJointIndicesByName
+                            leftIndexFingerTipIndex <- except $ note "No left index-finger-tip index" maybeLeftIndexFingerTipIndex
+                            leftThumbTipIndex <- except $ note "No left thumb-tip index" maybeLeftThumbTipIndex
+                            let leftIndexFingerTipStart = leftIndexFingerTipIndex * baseNumberOfDimensions
+                            let leftThumbTipStart = leftThumbTipIndex * baseNumberOfDimensions
+                            leftIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices leftIndexFingerTipStart (leftIndexFingerTipStart + baseNumberOfDimensions)
+                            leftThumbTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices leftThumbTipStart (leftThumbTipStart + baseNumberOfDimensions)
+                            leftPinchDistance <- liftEffect $ ForeignUtils.get3DDistance leftIndexFingerTipPosition leftThumbTipPosition
+                            when (leftPinchDistance < 0.02) $ liftEffect $ log "Left hand pinch"
+
+                            let maybeRightIndexFingerTipIndex = Map.lookup "index-finger-tip" handJointIndicesByName
+                            let maybeRightThumbTipIndex = Map.lookup "thumb-tip" handJointIndicesByName
+                            rightIndexFingerTipIndex <- except $ note "No right index-finger-tip index" maybeRightIndexFingerTipIndex
+                            rightThumbTipIndex <- except $ note "No right thumb-tip index" maybeRightThumbTipIndex
+                            let rightIndexFingerTipStart = rightIndexFingerTipIndex * baseNumberOfDimensions
+                            let rightThumbTipStart = rightThumbTipIndex * baseNumberOfDimensions
+                            rightIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices rightIndexFingerTipStart (rightIndexFingerTipStart + baseNumberOfDimensions)
+                            rightThumbTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices rightThumbTipStart (rightThumbTipStart + baseNumberOfDimensions)
+                            rightPinchDistance <- liftEffect $ ForeignUtils.get3DDistance rightIndexFingerTipPosition rightThumbTipPosition
+                            when (rightPinchDistance < 0.02) $ liftEffect $ log "Right hand pinch"
+
+                            -- Always clear the framebuffer, even if tracking is lost
+                            framebuffer <- liftEffect $ WebXR.getFramebuffer xrGLLayer
+                            liftEffect $ WebGL2.bindFramebuffer xrWebGL2Context WebGL2.framebuffer framebuffer
+                            liftEffect $ WebGL2.clearColor xrWebGL2Context 0.0 0.0 0.0 0.3
+                            liftEffect $ WebGL2.clear xrWebGL2Context (WebGL2.colorBufferBit .|. WebGL2.depthBufferBit)
+
+                            nullableViewerPose <- liftEffect $ WebXR.getViewerPose frame referenceSpace
+                            case toMaybe nullableViewerPose of
+                              Nothing -> pure unit
+                              Just viewerPose -> do
+                                views <- liftEffect $ WebXR.getViews viewerPose
+                                for_ views \view -> do
+                                  nullableViewport <- liftEffect $ WebXR.getViewport xrGLLayer view
+                                  viewport <- except $ note "no viewport" (toMaybe nullableViewport)
+                                  liftEffect $ WebGL2.viewport xrWebGL2Context viewport.x viewport.y viewport.width viewport.height
+
+                                  projectionMatrix <- pure $ WebXR.getProjectionMatrix view
+                                  viewMatrix <- pure $ WebXR.getViewMatrix view
+                                  liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context projectionLocation false projectionMatrix
+                                  liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context viewLocation false viewMatrix
+                                  liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false identityMatrix4x4Float32
+
+                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context leftHandVAO
+                                  liftEffect $ WebGL2.drawArrays xrWebGL2Context WebGL2.points 0 numberOfJointsPerHand
+
+                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context leftHandSkeletonVAO
+                                  liftEffect $ WebGL2.drawElements xrWebGL2Context WebGL2.lines (length handSkeletonByJointIndices) WebGL2.unsignedShort 0
+
+                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context rightHandVAO
+                                  liftEffect $ WebGL2.drawArrays xrWebGL2Context WebGL2.points 0 numberOfJointsPerHand
+
+                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context rightHandSkeletonVAO
+                                  liftEffect $ WebGL2.drawElements xrWebGL2Context WebGL2.lines (length handSkeletonByJointIndices) WebGL2.unsignedShort 0
+
+                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context cubeVAO
+                                  liftEffect $ WebGL2.drawArrays xrWebGL2Context WebGL2.points 0 (length cubeVertices3d / 3)
+                        case result of
+                            Left err -> log err
+                            Right _ -> pure unit
+                        _ <- liftEffect $ WebXR.requestAnimationFrame xrSession tick
+                        pure unit
+                _ <- liftEffect $ WebXR.requestAnimationFrame xrSession tick
+                pure unit
+
         maybeStartButton <- liftEffect $ getElementById "start-experience" (HTMLDocument.toNonElementParentNode doc)
         startButtonElement <- except $ note "Start experience button not found" maybeStartButton
         maybeStartButtonAsHtmlButtonElement <- pure $ HTMLButtonElement.fromElement startButtonElement
@@ -328,146 +452,3 @@ main = launchAff_ do
     liftEffect $ case result of
         Left errorMessage -> log errorMessage
         Right message -> log message
-
-
-runExperience :: Window -> Navigator -> WebGL2.RenderingContext -> Aff (Either String Unit)
-runExperience win nav webGL2Context = runExceptT do
-    nullableXRSystem <- liftEffect $ WebXR.getXRSystem nav
-    xrSystem <- except $ note "WebXR not supported" (toMaybe nullableXRSystem)
-
-
-    isWebXRSessionModeSupported <- liftAff $ WebXR.isWebXRSessionModeSupported xrSystem "immersive-ar"
-    _ <- if not isWebXRSessionModeSupported
-        then except $ Left "WebXR session mode not supported"
-        else except $ Right "WebXR session mode supported"
-    liftAff $ WebXR.makeXRWebGL2Compatible webGL2Context
-
-
-    xrSession <- liftAff $ WebXR.requestSession xrSystem "immersive-ar" { optionalFeatures: ["hit-test", "hand-tracking"] }
-    xrGLLayer <- liftEffect $ WebXR.createXRWebGLLayer win xrSession webGL2Context
-    liftEffect $ WebXR.updateRenderState xrSession { baseLayer: xrGLLayer }
-
-    referenceSpace <- liftAff $ WebXR.requestReferenceSpace xrSession "local"
-
-    -- let drawingVertices = ForeignUtils.float32Array (replicate (numberOfHandJointDimensions) 0.0)
-
-    let tick :: WebXR.XRFrameRequestCallback
-        tick _ frame = do
-            let leftHandVertices = ForeignUtils.float32Array (replicate (numberOfHandJointDimensions) 0.0)
-            let rightHandVertices = ForeignUtils.float32Array (replicate (numberOfHandJointDimensions) 0.0)
-
-            inputSources <- WebXR.getInputSources xrSession
-            for_ inputSources \inputSource -> void $ runExceptT do
-              nullableHand <- liftEffect $ WebXR.getHand inputSource
-              hand <- except $ note "Input source has no hand data" (toMaybe nullableHand)
-
-              nullableHandedness <- liftEffect $ WebXR.getHandedness inputSource
-              handedness <- except $ note "Handedness unknown" (toMaybe nullableHandedness)
-
-              verticesReference <- case handedness of
-                "left" -> pure leftHandVertices
-                "right" -> pure rightHandVertices
-                _ -> except $ Left ("Handedness unknown: " <> handedness)
-
-              joints <- liftEffect $ WebXR.getHandJoints hand
-              for_ joints \(Tuple jointName jointSpace) -> void $ runExceptT do
-                nullableJointPose <- liftEffect $ WebXR.getJointPose frame jointSpace referenceSpace
-                jointPose <- except $ note "No joint pose" (toMaybe nullableJointPose)
-
-                index <- except $ note ("Unknown joint name: " <> jointName) (Map.lookup jointName handJointIndicesByName)
-
-                positionArray <- liftEffect $ WebXR.getJointPosition jointPose
-                let offset = index * 3
-                liftEffect $ ForeignUtils.copyInto verticesReference positionArray offset
-              pure unit
-
-            --       gl.bindBuffer(gl.ARRAY_BUFFER, leftHandBuffer)
-            --       gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(leftHandVertices), 0, leftHandVertices.length)
-            --
-            --       gl.bindBuffer(gl.ARRAY_BUFFER, rightHandBuffer)
-            --       gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(rightHandVertices), 0, rightHandVertices.length)
-            --
-            --       if (leftHandVertices.length) {
-            --         const leftHandIndexFingerTipIndex: Float32Array = leftHandVertices.subarray(
-            --           HAND_JOINT_INDICES_BY_NAME['index-finger-tip'] * BASE_NUMBER_OF_DIMENSIONS,
-            --           HAND_JOINT_INDICES_BY_NAME['index-finger-tip'] * BASE_NUMBER_OF_DIMENSIONS + BASE_NUMBER_OF_DIMENSIONS
-            --         )
-            --         const leftHandThumbTipIndex: Float32Array = leftHandVertices.subarray(
-            --           HAND_JOINT_INDICES_BY_NAME['thumb-tip'] * BASE_NUMBER_OF_DIMENSIONS,
-            --           HAND_JOINT_INDICES_BY_NAME['thumb-tip'] * BASE_NUMBER_OF_DIMENSIONS + BASE_NUMBER_OF_DIMENSIONS
-            --         )
-            --         const distanceBetweenLeftHandIndexFingerTipAndThumbTip: number = Math.sqrt(
-            --           (leftHandIndexFingerTipIndex[0] - leftHandThumbTipIndex[0]) ** 2 +
-            --           (leftHandIndexFingerTipIndex[1] - leftHandThumbTipIndex[1]) ** 2 +
-            --           (leftHandIndexFingerTipIndex[2] - leftHandThumbTipIndex[2]) ** 2
-            --         )
-            --         console.log('Distance between left hand index finger tip and thumb tip:', distanceBetweenLeftHandIndexFingerTipAndThumbTip)
-            --         if (distanceBetweenLeftHandIndexFingerTipAndThumbTip < 0.02) {
-            --           // CODE Interactions
-            --           // Take the cube position and update it based on the difference between the start of the event and the end
-            --         }
-            --       }
-            --
-            --       if (rightHandVertices.length) {
-            --         const rightHandIndexFingerTipIndex: Float32Array = rightHandVertices.subarray(
-            --           HAND_JOINT_INDICES_BY_NAME['index-finger-tip'] * BASE_NUMBER_OF_DIMENSIONS,
-            --           HAND_JOINT_INDICES_BY_NAME['index-finger-tip'] * BASE_NUMBER_OF_DIMENSIONS + BASE_NUMBER_OF_DIMENSIONS
-            --         )
-            --         const rightHandThumbTipIndex: Float32Array = rightHandVertices.subarray(
-            --           HAND_JOINT_INDICES_BY_NAME['thumb-tip'] * BASE_NUMBER_OF_DIMENSIONS,
-            --           HAND_JOINT_INDICES_BY_NAME['thumb-tip'] * BASE_NUMBER_OF_DIMENSIONS + BASE_NUMBER_OF_DIMENSIONS
-            --         )
-            --         const distanceBetweenrightHandIndexFingerTipAndThumbTip: number = Math.sqrt(
-            --           (rightHandIndexFingerTipIndex[0] - rightHandThumbTipIndex[0]) ** 2 +
-            --           (rightHandIndexFingerTipIndex[1] - rightHandThumbTipIndex[1]) ** 2 +
-            --           (rightHandIndexFingerTipIndex[2] - rightHandThumbTipIndex[2]) ** 2
-            --         )
-            --         if (distanceBetweenrightHandIndexFingerTipAndThumbTip < 0.02) {
-            --         }
-            --       }
-            --
-            --       const pose: XRViewerPose | undefined = frame.getViewerPose(referenceSpace)
-            --       if (!pose) {
-            --         xrSession.requestAnimationFrame(onXRFrame)
-            --         return
-            --       }
-            --
-            --       gl.bindFramebuffer(gl.FRAMEBUFFER, xrGLLayer.framebuffer)
-            --
-            --       gl.clearColor(0.0, 0.0, 0.0, 0.3)
-            --       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-            --
-            --       for (const view of pose.views) {
-            --         const viewport: XRViewport | undefined = xrGLLayer.getViewport(view)
-            --         if (!viewport) continue
-            --
-            --         gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height)
-            --
-            --         gl.uniformMatrix4fv(projectionLocation, false, view.projectionMatrix)
-            --         gl.uniformMatrix4fv(viewLocation, false, view.transform.inverse.matrix)
-            --         gl.uniformMatrix4fv(modelLocation, false, new Float32Array(IDENTITY_MATRIX))
-            --
-            --         gl.bindVertexArray(leftHandVAO)
-            --         gl.drawArrays(gl.POINTS, 0, NUMBER_OF_JOINTS_PER_HAND)
-            --
-            --         gl.bindVertexArray(leftHandSkeletonVAO)
-            --         gl.drawElements(gl.LINES, HAND_SKELETON_BY_JOINT_INDICES.length, gl.UNSIGNED_SHORT, 0)
-            --
-            --         gl.bindVertexArray(rightHandVAO)
-            --         gl.drawArrays(gl.POINTS, 0, NUMBER_OF_JOINTS_PER_HAND)
-            --
-            --         gl.bindVertexArray(rightHandSkeletonVAO)
-            --         gl.drawElements(gl.LINES, HAND_SKELETON_BY_JOINT_INDICES.length, gl.UNSIGNED_SHORT, 0)
-            --
-            --         // render the scene graphic data
-            --         // For each model take the corresponding matrices and multiply them here, then pass the resulting matrix to the shader and render the model
-            --         // CODE
-            --         gl.bindVertexArray(cubeVAO)
-            --         gl.drawArrays(gl.POINTS, 0, CUBE_VERTICES.length / BASE_NUMBER_OF_DIMENSIONS)
-            --       }
-            --
-            --       xrSession.requestAnimationFrame(onXRFrame)
-            _ <- liftEffect $ WebXR.requestAnimationFrame xrSession tick
-            pure unit
-    _ <- liftEffect $ WebXR.requestAnimationFrame xrSession tick
-    pure unit

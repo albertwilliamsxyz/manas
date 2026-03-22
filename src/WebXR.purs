@@ -75,3 +75,24 @@ foreign import getHandedness :: XRInputSource -> Effect (Nullable String)
 foreign import getHandJoints :: XRHand -> Effect (Array (Tuple String XRJointSpace))
 
 foreign import getJointPosition :: XRJointPose -> Effect ForeignUtils.Float32Array
+
+foreign import data XRView :: Type
+type XRViewport = 
+  { x :: Int
+  , y :: Int
+  , width :: Int
+  , height :: Int 
+  }
+
+foreign import getViews :: XRViewerPose -> Effect (Array XRView)
+
+foreign import getViewport :: XRWebGLLayer -> XRView -> Effect (Nullable XRViewport)
+
+
+foreign import getProjectionMatrix :: XRView -> ForeignUtils.Float32Array
+
+foreign import getViewMatrix :: XRView -> ForeignUtils.Float32Array
+
+foreign import data XRFramebuffer :: Type
+foreign import getFramebuffer :: XRWebGLLayer -> Effect XRFramebuffer
+

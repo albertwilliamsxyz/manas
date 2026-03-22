@@ -6,4 +6,7 @@ export const setAt = (arr) => (i) => (val) => () => { arr[i] = val; };
 
 export const copyInto = (target) => (source) => (offset) => () => target.set(source, offset);
 
-export const get3DDistance = (a) => (b) => () => Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2);
+export const subarray = (array) => (start) => (end) => () => array.subarray(start, end);
+
+export const get3DDistance = (arrayA) => (arrayB) => () => Math.sqrt((arrayA[0] - arrayB[0]) ** 2 + (arrayA[1] - arrayB[1]) ** 2 + (arrayA[2] - arrayB[2]) ** 2);
+
