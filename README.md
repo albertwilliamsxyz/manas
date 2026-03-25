@@ -4,7 +4,7 @@ This program aims to elevate human cognition by providing an immersive, holistic
 
 ---
 
-## Current Capabilities
+## Dojo Guide\n\nSee [docs/MANAS-DOJO.md](docs/MANAS-DOJO.md) for learner-focused math/FP walkthrough.
 
 - **WebXR & WebGL2 Integration**: The main application leverages WebXR and WebGL2 to render interactive 3D environments, supporting VR/AR sessions.
 - **Hand Tracking**: Real-time hand tracking is implemented, allowing users to interact with the environment using gestures. The system tracks 25 joints per hand and recognizes gestures such as pinching.
