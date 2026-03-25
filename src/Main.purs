@@ -3,7 +3,7 @@ module Main where
 import Prelude
 
 import Control.Monad.Except (except, runExceptT)
-import Data.Array (length, replicate, take)
+import Data.Array (length, replicate)
 import Data.Either (Either(..), note)
 import Data.Foldable (for_)
 import Data.Int.Bits ((.|.))
@@ -327,7 +327,7 @@ main = launchAff_ do
                 liftAff $ WebXR.makeXRWebGL2Compatible xrWebGL2Context
 
 
-                xrSession <- liftAff $ WebXR.requestSession xrSystem "immersive-ar" { optionalFeatures: ["hit-test", "hand-tracking"] }
+                xrSession <- liftAff $ WebXR.requestSession xrSystem "immersive-ar" { requiredFeatures: ["hand-tracking"] }
                 xrGLLayer <- liftEffect $ WebXR.createXRWebGLLayer xrWin xrSession xrWebGL2Context
                 liftEffect $ WebXR.updateRenderState xrSession { baseLayer: xrGLLayer }
 
@@ -367,7 +367,6 @@ main = launchAff_ do
                                         Left err -> liftEffect $ log $ "Joint Loop Error (" <> joint.name <> "): " <> err
                                         Right _ -> pure unit
 
-                            liftEffect $ log $ "leftHandVertices[0..2]: " <> show (take 3 (ForeignUtils.toArray leftHandVertices))
                             liftEffect $ WebGL2.bindBuffer xrWebGL2Context WebGL2.arrayBuffer leftHandBuffer
                             liftEffect $ WebGL2.bufferSubData xrWebGL2Context WebGL2.arrayBuffer 0 leftHandVertices
                             liftEffect $ WebGL2.bindBuffer xrWebGL2Context WebGL2.arrayBuffer rightHandBuffer

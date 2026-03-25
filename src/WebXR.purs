@@ -26,7 +26,7 @@ isWebXRSessionModeSupported xrSystem mode = toAffE $ isWebXRSessionModeSupported
 
 
 foreign import data XRSession :: Type
-type RequestSessionOptions = { optionalFeatures :: Array String }
+type RequestSessionOptions = { requiredFeatures :: Array String }
 
 foreign import requestSessionImpl :: XRSystem -> String -> RequestSessionOptions -> Effect (Promise XRSession)
 requestSession :: XRSystem -> String -> RequestSessionOptions -> Aff XRSession
