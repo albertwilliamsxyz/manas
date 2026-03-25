@@ -1,0 +1,1 @@
+# Learning Feast\n\nBreakfast reads: 01-lambda → 05-cats. 1 per meal. Do exercises—report ignorance!\n\nBuild math muscle for Manas.
