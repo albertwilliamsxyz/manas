@@ -233,6 +233,7 @@ type InputState =
 type GrabState =
     { heldObject :: Maybe SceneObjectId
     , grabOffset :: Maybe ForeignUtils.Float32Array
+    , wasPinching :: Boolean
     }
 
 -- [Scene types]
@@ -425,15 +426,18 @@ updateGrab
     -> Maybe { id :: SceneObjectId, position :: ForeignUtils.Float32Array }
     -> GrabState
     -> GrabState
-updateGrab isPinching pinchPosition hitResult grabState = case isPinching, grabState.heldObject of
-    false, Nothing -> grabState
-    false, Just _  -> { heldObject: Nothing, grabOffset: Nothing }
-    true, Just _   -> grabState
-    true, Nothing  -> case hitResult of
-        Nothing -> grabState
-        Just hit -> { heldObject: Just hit.id
-                    , grabOffset: Just (ForeignUtils.sub3 pinchPosition hit.position) 
+updateGrab isPinching pinchPosition hitResult grabState = 
+    let result = case isPinching, grabState.heldObject of
+            false, Nothing -> grabState
+            false, Just _  -> grabState { heldObject = Nothing, grabOffset = Nothing }
+            true, Just _   -> grabState
+            true, Nothing  -> case hitResult of
+                Nothing -> grabState
+                Just hit -> grabState 
+                    { heldObject = Just hit.id
+                    , grabOffset = Just (ForeignUtils.sub3 pinchPosition hit.position)
                     }
+    in result { wasPinching = isPinching }
 
 applyGrab 
     :: ForeignUtils.Float32Array
@@ -576,8 +580,8 @@ main = launchAff_ do
                         }
                     }
                 , interaction:
-                    { left: { heldObject: Nothing, grabOffset: Nothing }
-                    , right: { heldObject: Nothing, grabOffset: Nothing }
+                    { left: { heldObject: Nothing, grabOffset: Nothing, wasPinching: false }
+                    , right: { heldObject: Nothing, grabOffset: Nothing, wasPinching: false }
                     }
                 }
 
@@ -691,6 +695,9 @@ main = launchAff_ do
                             liftEffect $ WebGL2.bufferSubData xrWebGL2Context WebGL2.arrayBuffer 0 rightHandVertices
 
                             -- [Managing gestures]
+
+                            worldState <- liftEffect $ Ref.read worldStateRef
+
                             let maybeIndexFingerTipIndex = Map.lookup "index-finger-tip" handJointIndicesByName
                             let maybeThumbTipIndex = Map.lookup "thumb-tip" handJointIndicesByName
                             indexFingerTipIndex <- except $ note "No index-finger-tip index" maybeIndexFingerTipIndex
@@ -698,21 +705,10 @@ main = launchAff_ do
                             let indexFingerTipStart = indexFingerTipIndex * baseNumberOfDimensions
                             let thumbTipStart = thumbTipIndex * baseNumberOfDimensions
 
-                            -- Left hand pinch detection
-                            leftIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices indexFingerTipStart (indexFingerTipStart + baseNumberOfDimensions)
-                            leftThumbTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices thumbTipStart (thumbTipStart + baseNumberOfDimensions)
-                            leftThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance leftIndexFingerTipPosition leftThumbTipPosition
-                            let leftIsPinching = leftThumbIndexDistance < pinchThreshold
-
-                            -- Right hand pinch detection
                             rightIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices indexFingerTipStart (indexFingerTipStart + baseNumberOfDimensions)
                             rightThumbTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices thumbTipStart (thumbTipStart + baseNumberOfDimensions)
                             rightThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance rightIndexFingerTipPosition rightThumbTipPosition
                             let rightIsPinching = rightThumbIndexDistance < pinchThreshold
-
-                            -- Grab system
-                            worldState <- liftEffect $ Ref.read worldStateRef
-
                             let rightHit = case rightIsPinching, worldState.interaction.right.heldObject of
                                     true, Nothing ->
                                         case findNearestObject rightIndexFingerTipPosition worldState.sceneObjects of
@@ -724,6 +720,10 @@ main = launchAff_ do
                             let rightHandUpdate = updateGrab rightIsPinching rightIndexFingerTipPosition rightHit worldState.interaction.right
                             let rightSceneObjects = applyGrab rightIndexFingerTipPosition rightHandUpdate worldState.sceneObjects
 
+                            leftIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices indexFingerTipStart (indexFingerTipStart + baseNumberOfDimensions)
+                            leftThumbTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices thumbTipStart (thumbTipStart + baseNumberOfDimensions)
+                            leftThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance leftIndexFingerTipPosition leftThumbTipPosition
+                            let leftIsPinching = leftThumbIndexDistance < pinchThreshold
                             let leftHit = case leftIsPinching, worldState.interaction.left.heldObject of
                                     true, Nothing ->
                                         case findNearestObject leftIndexFingerTipPosition rightSceneObjects of
@@ -739,6 +739,13 @@ main = launchAff_ do
                                 { sceneObjects = finalSceneObjects
                                 , interaction = { right: rightHandUpdate, left: leftHandUpdate }
                                 }) worldStateRef
+
+                            let leftJustStartedPinching = leftIsPinching && not worldState.interaction.left.wasPinching
+                            case leftHit of
+                                Nothing -> when leftJustStartedPinching do
+                                    translationMatrix <- liftEffect $ makeTranslationMatrix leftIndexFingerTipPosition
+                                    liftEffect $ Ref.modify_ (addCubeToScene translationMatrix) worldStateRef
+                                _ -> pure unit
 
                             -- [Managing rendering]
                             framebuffer <- liftEffect $ WebXR.getFramebuffer xrGLLayer
