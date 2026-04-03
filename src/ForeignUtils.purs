@@ -2,6 +2,7 @@ module ForeignUtils where
 
 import Prelude
 
+import Data.Nullable (Nullable)
 import Effect (Effect)
 
 
@@ -21,4 +22,29 @@ foreign import subarray :: Float32Array -> Int -> Int -> Effect Float32Array
 
 foreign import get3DDistance :: Float32Array -> Float32Array -> Effect Number
 
+foreign import get3DDistanceFromMatrix :: Float32Array -> Float32Array -> Number
+
 foreign import toArray :: Float32Array -> Array Number
+
+foreign import multiplyMatrix4x4 :: Float32Array -> Float32Array -> Float32Array
+
+foreign import sub3 :: Float32Array -> Float32Array -> Float32Array
+
+foreign import dot3 :: Float32Array -> Float32Array -> Number
+
+foreign import cross3 :: Float32Array -> Float32Array -> Float32Array
+
+foreign import normalize3 :: Float32Array -> Float32Array
+
+foreign import rayTriangleIntersect 
+    :: { origin :: Float32Array, direction :: Float32Array } 
+    -> Float32Array 
+    -> Float32Array 
+    -> Float32Array 
+    -> Nullable Number
+
+foreign import transformPoint3 :: Float32Array -> Float32Array -> Float32Array
+
+foreign import translationMatrix4x4 :: Float32Array -> Float32Array
+
+foreign import getTranslationFromMatrix :: Float32Array -> Float32Array

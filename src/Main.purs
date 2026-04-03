@@ -2,8 +2,8 @@ module Main where
 
 import Prelude
 
-import Control.Monad.Except (except, runExceptT)
-import Data.Array (length, replicate)
+import Control.Monad.Except (ExceptT, except, runExceptT)
+import Data.Array (length, replicate, uncons, (!!))
 import Data.Either (Either(..), note)
 import Data.Foldable (for_)
 import Data.Int.Bits ((.|.))
@@ -11,7 +11,7 @@ import Data.Map (Map, fromFoldable)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Nullable (toMaybe)
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), fst)
 import Effect (Effect)
 import Effect.Aff (Aff, launchAff_)
 import Effect.Aff.Class (liftAff)
@@ -89,7 +89,7 @@ handJointIndicesByName =
     ]
 
 pinchThreshold :: Number
-pinchThreshold = 0.05
+pinchThreshold = 0.02
 
 -- [Geometry]
 
@@ -176,7 +176,8 @@ derive instance ordGeometryId :: Ord GeometryId
 
 type Geometry =
     { vertices :: Array Number
-    , indices :: Maybe (Array Int)
+    , edgeIndices :: Array Int
+    , triangleIndices :: Array Int
     , topology :: Topology
     }
 
@@ -186,11 +187,17 @@ type Transform =
     , scale :: ForeignUtils.Float32Array
     }
 
+type Ray = 
+    { origin :: ForeignUtils.Float32Array
+    , direction :: ForeignUtils.Float32Array
+    }
+
 -- [WebGL resource types]
 
 type GPUHandle =
     { vao :: WebGL2.VertexArrayObject
-    , buffer :: WebGL2.Buffer
+    , vertexBuffer :: WebGL2.Buffer
+    , indexBuffer :: WebGL2.Buffer
     , drawMode :: Int
     , vertexCount :: Int
     }
@@ -221,6 +228,13 @@ type InputState =
     , controllers :: Controllers
     }
 
+-- [Interaction types]
+
+type GrabState =
+    { heldObject :: Maybe SceneObjectId
+    , grabOffset :: Maybe ForeignUtils.Float32Array
+    }
+
 -- [Scene types]
 
 newtype SceneObjectId = SceneObjectId String
@@ -241,6 +255,7 @@ type WorldState =
     , sceneObjects :: Map SceneObjectId SceneObject
     , nextObjectId :: Int
     , inputs :: InputState
+    , interaction :: { left :: GrabState, right :: GrabState }
     }
 
 
@@ -259,6 +274,43 @@ generateRandomTranslationMatrix4x4Float32 = do
         , 0.0, 0.0, 1.0, 0.0
         , tx, ty, tz, 1.0
         ]
+
+getVertex :: Array Number -> Int -> ForeignUtils.Float32Array
+getVertex vertices i = 
+    let offset = i * 3
+        x = fromMaybe 0.0 (vertices !! offset)
+        y = fromMaybe 0.0 (vertices !! (offset + 1))
+        z = fromMaybe 0.0 (vertices !! (offset + 2))
+    in ForeignUtils.float32Array [x, y, z]
+
+rayMeshIntersect 
+    :: { origin :: ForeignUtils.Float32Array, direction :: ForeignUtils.Float32Array } 
+    -> ForeignUtils.Float32Array 
+    -> Geometry 
+    -> Maybe Number
+rayMeshIntersect ray modelMatrix geometry = 
+    go 0 Nothing
+    where
+    verts = geometry.vertices
+    indices = geometry.triangleIndices
+    numTriangles = length indices / 3
+    
+    go :: Int -> Maybe Number -> Maybe Number
+    go i closest
+        | i >= numTriangles = closest
+        | otherwise = 
+            let idx = i * 3
+                i0 = fromMaybe 0 (indices !! idx)
+                i1 = fromMaybe 0 (indices !! (idx + 1))
+                i2 = fromMaybe 0 (indices !! (idx + 2))
+                v0 = ForeignUtils.transformPoint3 modelMatrix (getVertex verts i0)
+                v1 = ForeignUtils.transformPoint3 modelMatrix (getVertex verts i1)
+                v2 = ForeignUtils.transformPoint3 modelMatrix (getVertex verts i2)
+                hit = toMaybe (ForeignUtils.rayTriangleIntersect ray v0 v1 v2)
+            in case hit, closest of
+                Just t, Nothing -> go (i + 1) (Just t)
+                Just t, Just prev -> go (i + 1) (Just (min t prev))
+                Nothing, _ -> go (i + 1) closest
 
 
 -- [Utilities]
@@ -284,6 +336,29 @@ addCubeToScene position worldState = worldState
                 }
             }
 
+uploadGeometry :: WebGL2.RenderingContext -> Int -> Geometry -> ExceptT String Effect GPUHandle
+uploadGeometry webGL2Context positionLocation geometry = do
+    nullableVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
+    vao <- except $ note "VAO could not be created" (toMaybe nullableVAO)
+    nullableVertexBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
+    vertexBuffer <- except $ note "Vertex buffer could not be created" (toMaybe nullableVertexBuffer)
+    nullableIndexBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
+    indexBuffer <- except $ note "Index buffer could not be created" (toMaybe nullableIndexBuffer)
+    liftEffect $ WebGL2.bindVertexArray webGL2Context vao
+    liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer vertexBuffer
+    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (ForeignUtils.float32Array geometry.vertices) WebGL2.staticDraw
+    liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer indexBuffer
+    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (ForeignUtils.uint16Array geometry.edgeIndices) WebGL2.staticDraw
+    liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
+    liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
+    liftEffect $ WebGL2.unbindVertexArray webGL2Context
+    pure { vao
+         , vertexBuffer
+         , indexBuffer
+         , drawMode: topologyToDrawMode geometry.topology
+         , vertexCount: length geometry.edgeIndices
+         }
+
 makeTranslationMatrix :: ForeignUtils.Float32Array -> Effect ForeignUtils.Float32Array
 makeTranslationMatrix position = do
     x <- ForeignUtils.getAt position 0
@@ -295,6 +370,82 @@ makeTranslationMatrix position = do
         , 0.0, 0.0, 1.0, 0.0
         , x, y, z, 1.0
         ]
+
+composeModelMatrix :: Transform -> ForeignUtils.Float32Array
+composeModelMatrix transform = 
+    ForeignUtils.multiplyMatrix4x4 transform.translation 
+        (ForeignUtils.multiplyMatrix4x4 transform.rotation transform.scale)
+
+findHitObject 
+    :: { origin :: ForeignUtils.Float32Array, direction :: ForeignUtils.Float32Array }
+    -> WorldState 
+    -> Maybe SceneObjectId
+findHitObject ray worldState = 
+    go (Map.toUnfoldable worldState.sceneObjects :: Array (Tuple SceneObjectId SceneObject)) Nothing
+    where
+    go entries acc = case uncons entries of
+        Nothing -> fst <$> acc
+        Just { head: Tuple objId obj, tail: rest } ->
+            case Map.lookup obj.geometryId worldState.geometries of
+                Nothing -> go rest acc
+                Just geom -> 
+                    let modelMatrix = composeModelMatrix obj.transform
+                        hit = rayMeshIntersect ray modelMatrix geom
+                    in case hit, acc of
+                        Just t, Nothing -> go rest (Just (Tuple objId t))
+                        Just t, Just (Tuple _ prevT) 
+                            | t < prevT -> go rest (Just (Tuple objId t))
+                        _, _ -> go rest acc
+
+findNearestObject 
+    :: ForeignUtils.Float32Array
+    -> Map SceneObjectId SceneObject
+    -> Maybe SceneObjectId
+findNearestObject pinchPoint sceneObjects = 
+    go (Map.toUnfoldable sceneObjects :: Array (Tuple SceneObjectId SceneObject)) Nothing
+    where
+    grabRadius = 0.15
+
+    go entries acc = case uncons entries of
+        Nothing -> fst <$> acc
+        Just { head: Tuple objId obj, tail: rest } ->
+            let modelMatrix = composeModelMatrix obj.transform
+                dist = ForeignUtils.get3DDistanceFromMatrix pinchPoint modelMatrix
+            in if dist < grabRadius
+                then case acc of
+                    Nothing -> go rest (Just (Tuple objId dist))
+                    Just (Tuple _ prevDist) 
+                        | dist < prevDist -> go rest (Just (Tuple objId dist))
+                        | otherwise -> go rest acc
+                else go rest acc
+
+updateGrab 
+    :: Boolean
+    -> ForeignUtils.Float32Array
+    -> Maybe { id :: SceneObjectId, position :: ForeignUtils.Float32Array }
+    -> GrabState
+    -> GrabState
+updateGrab isPinching pinchPosition hitResult grabState = case isPinching, grabState.heldObject of
+    false, Nothing -> grabState
+    false, Just _  -> { heldObject: Nothing, grabOffset: Nothing }
+    true, Just _   -> grabState
+    true, Nothing  -> case hitResult of
+        Nothing -> grabState
+        Just hit -> { heldObject: Just hit.id
+                    , grabOffset: Just (ForeignUtils.sub3 pinchPosition hit.position) 
+                    }
+
+applyGrab 
+    :: ForeignUtils.Float32Array
+    -> GrabState
+    -> Map SceneObjectId SceneObject
+    -> Map SceneObjectId SceneObject
+applyGrab pinchPosition grabState sceneObjects = 
+    case grabState.heldObject, grabState.grabOffset of
+        Just objId, Just offset ->
+            let newPosition = ForeignUtils.sub3 pinchPosition offset
+            in Map.update (\obj -> Just obj { transform = obj.transform { translation = ForeignUtils.translationMatrix4x4 newPosition } }) objId sceneObjects
+        _, _ -> sceneObjects
 
 
 -- [Main]
@@ -381,40 +532,20 @@ main = launchAff_ do
         colorLocation <- except $ note "Unable to get the location of the color uniform" (toMaybe nullableColorLocation)
         liftEffect $ WebGL2.uniform4fv webGL2Context colorLocation (ForeignUtils.float32Array [0.0, 0.8, 0.0, 1.0])
 
-        -- [Setting up WebGL buffers and vertex array objects / Scene Objects]
-        cubePosition <- liftEffect $ generateRandomTranslationMatrix4x4Float32
-
-        nullableCubeVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
-        cubeVAO <- except $ note "Cube VAO could not be created" (toMaybe nullableCubeVAO)
-        nullableCubeBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
-        cubeBuffer <- except $ note "Cube buffer could not be created" (toMaybe nullableCubeBuffer)
-        nullableCubeIndexBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
-        cubeIndexBuffer <- except $ note "Cube index buffer could not be created" (toMaybe nullableCubeIndexBuffer)
-        liftEffect $ WebGL2.bindVertexArray webGL2Context cubeVAO
-        liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer cubeBuffer
-        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (ForeignUtils.float32Array cubeVertices) WebGL2.staticDraw
-        liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer cubeIndexBuffer
-        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (ForeignUtils.uint16Array cubeEdgeIndices) WebGL2.staticDraw
-        liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
-        liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
-        liftEffect $ WebGL2.unbindVertexArray webGL2Context
-
         -- [WIP: Abstracting new structure]
 
         let cubeGeometryId = GeometryId "cube"
             cubeGeometry =
                 { vertices: cubeVertices
-                , indices: Just cubeEdgeIndices
+                , edgeIndices: cubeEdgeIndices
+                ,triangleIndices: cubeTriangleIndices
                 , topology: Lines
                 }
 
-        let cubeGPUHandle =
-                { vao: cubeVAO
-                , buffer: cubeBuffer
-                , drawMode: topologyToDrawMode Lines
-                , vertexCount: length cubeEdgeIndices
-                }
+        cubeGPUHandleResult <- liftEffect $ runExceptT $ uploadGeometry webGL2Context positionLocation cubeGeometry
+        cubeGPUHandle <- except cubeGPUHandleResult
 
+        cubePosition <- liftEffect $ generateRandomTranslationMatrix4x4Float32
         let cubeSceneObjectId = SceneObjectId "cube-instance-1"
             cubeSceneObject =
                 { geometryId: cubeGeometryId
@@ -444,11 +575,13 @@ main = launchAff_ do
                         , right: Nothing
                         }
                     }
+                , interaction:
+                    { left: { heldObject: Nothing, grabOffset: Nothing }
+                    , right: { heldObject: Nothing, grabOffset: Nothing }
+                    }
                 }
 
         worldStateRef <- liftEffect $ Ref.new initialWorldState
-        leftWasPinchingRef <- liftEffect $ Ref.new false
-        rightWasPinchingRef <- liftEffect $ Ref.new false
 
         nullableHandSkeletonJointIndicesBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
         handSkeletonJointIndicesBuffer <- except $ note "Hand skeleton joint indices buffer could not be created" (toMaybe nullableHandSkeletonJointIndicesBuffer)
@@ -558,39 +691,54 @@ main = launchAff_ do
                             liftEffect $ WebGL2.bufferSubData xrWebGL2Context WebGL2.arrayBuffer 0 rightHandVertices
 
                             -- [Managing gestures]
-                            let maybeLeftIndexFingerTipIndex = Map.lookup "index-finger-tip" handJointIndicesByName
-                            let maybeLeftThumbTipIndex = Map.lookup "thumb-tip" handJointIndicesByName
-                            leftIndexFingerTipIndex <- except $ note "No left index-finger-tip index" maybeLeftIndexFingerTipIndex
-                            leftThumbTipIndex <- except $ note "No left thumb-tip index" maybeLeftThumbTipIndex
-                            let leftIndexFingerTipStart = leftIndexFingerTipIndex * baseNumberOfDimensions
-                            let leftThumbTipStart = leftThumbTipIndex * baseNumberOfDimensions
-                            leftIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices leftIndexFingerTipStart (leftIndexFingerTipStart + baseNumberOfDimensions)
-                            leftThumbTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices leftThumbTipStart (leftThumbTipStart + baseNumberOfDimensions)
-                            leftThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance leftIndexFingerTipPosition leftThumbTipPosition
-                            leftWasPinching <- liftEffect $ Ref.read leftWasPinchingRef
-                            let leftIsPinching = leftThumbIndexDistance < pinchThreshold
-                            when (leftIsPinching && not leftWasPinching) do
-                                liftEffect $ log "Left pinch detected"
-                                randomTranslationMatrix <- liftEffect $ generateRandomTranslationMatrix4x4Float32
-                                liftEffect $ Ref.modify_ (addCubeToScene randomTranslationMatrix) worldStateRef 
-                            liftEffect $ Ref.write leftIsPinching leftWasPinchingRef
+                            let maybeIndexFingerTipIndex = Map.lookup "index-finger-tip" handJointIndicesByName
+                            let maybeThumbTipIndex = Map.lookup "thumb-tip" handJointIndicesByName
+                            indexFingerTipIndex <- except $ note "No index-finger-tip index" maybeIndexFingerTipIndex
+                            thumbTipIndex <- except $ note "No thumb-tip index" maybeThumbTipIndex
+                            let indexFingerTipStart = indexFingerTipIndex * baseNumberOfDimensions
+                            let thumbTipStart = thumbTipIndex * baseNumberOfDimensions
 
-                            let maybeRightIndexFingerTipIndex = Map.lookup "index-finger-tip" handJointIndicesByName
-                            let maybeRightThumbTipIndex = Map.lookup "thumb-tip" handJointIndicesByName
-                            rightIndexFingerTipIndex <- except $ note "No right index-finger-tip index" maybeRightIndexFingerTipIndex
-                            rightThumbTipIndex <- except $ note "No right thumb-tip index" maybeRightThumbTipIndex
-                            let rightIndexFingerTipStart = rightIndexFingerTipIndex * baseNumberOfDimensions
-                            let rightThumbTipStart = rightThumbTipIndex * baseNumberOfDimensions
-                            rightIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices rightIndexFingerTipStart (rightIndexFingerTipStart + baseNumberOfDimensions)
-                            rightThumbTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices rightThumbTipStart (rightThumbTipStart + baseNumberOfDimensions)
+                            -- Left hand pinch detection
+                            leftIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices indexFingerTipStart (indexFingerTipStart + baseNumberOfDimensions)
+                            leftThumbTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices thumbTipStart (thumbTipStart + baseNumberOfDimensions)
+                            leftThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance leftIndexFingerTipPosition leftThumbTipPosition
+                            let leftIsPinching = leftThumbIndexDistance < pinchThreshold
+
+                            -- Right hand pinch detection
+                            rightIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices indexFingerTipStart (indexFingerTipStart + baseNumberOfDimensions)
+                            rightThumbTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices thumbTipStart (thumbTipStart + baseNumberOfDimensions)
                             rightThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance rightIndexFingerTipPosition rightThumbTipPosition
-                            rightWasPinching <- liftEffect $ Ref.read rightWasPinchingRef
                             let rightIsPinching = rightThumbIndexDistance < pinchThreshold
-                            when (rightIsPinching && not rightWasPinching) do
-                                liftEffect $ log "Right pinch detected"
-                                translationMatrix <- liftEffect $ makeTranslationMatrix rightIndexFingerTipPosition
-                                liftEffect $ Ref.modify_ (addCubeToScene translationMatrix) worldStateRef
-                            liftEffect $ Ref.write rightIsPinching rightWasPinchingRef
+
+                            -- Grab system
+                            worldState <- liftEffect $ Ref.read worldStateRef
+
+                            let rightHit = case rightIsPinching, worldState.interaction.right.heldObject of
+                                    true, Nothing ->
+                                        case findNearestObject rightIndexFingerTipPosition worldState.sceneObjects of
+                                            Just objId -> case Map.lookup objId worldState.sceneObjects of
+                                                Just obj -> Just { id: objId, position: ForeignUtils.getTranslationFromMatrix (composeModelMatrix obj.transform) }
+                                                Nothing -> Nothing
+                                            Nothing -> Nothing
+                                    _, _ -> Nothing
+                            let rightHandUpdate = updateGrab rightIsPinching rightIndexFingerTipPosition rightHit worldState.interaction.right
+                            let rightSceneObjects = applyGrab rightIndexFingerTipPosition rightHandUpdate worldState.sceneObjects
+
+                            let leftHit = case leftIsPinching, worldState.interaction.left.heldObject of
+                                    true, Nothing ->
+                                        case findNearestObject leftIndexFingerTipPosition rightSceneObjects of
+                                            Just objId -> case Map.lookup objId rightSceneObjects of
+                                                Just obj -> Just { id: objId, position: ForeignUtils.getTranslationFromMatrix (composeModelMatrix obj.transform) }
+                                                Nothing -> Nothing
+                                            Nothing -> Nothing
+                                    _, _ -> Nothing
+                            let leftHandUpdate = updateGrab leftIsPinching leftIndexFingerTipPosition leftHit worldState.interaction.left
+                            let finalSceneObjects = applyGrab leftIndexFingerTipPosition leftHandUpdate rightSceneObjects
+
+                            liftEffect $ Ref.modify_ (\ws -> ws 
+                                { sceneObjects = finalSceneObjects
+                                , interaction = { right: rightHandUpdate, left: leftHandUpdate }
+                                }) worldStateRef
 
                             -- [Managing rendering]
                             framebuffer <- liftEffect $ WebXR.getFramebuffer xrGLLayer
@@ -629,12 +777,12 @@ main = launchAff_ do
                                   liftEffect $ WebGL2.bindVertexArray xrWebGL2Context rightHandSkeletonVAO
                                   liftEffect $ WebGL2.drawElements xrWebGL2Context WebGL2.lines (length handSkeletonByJointIndices) WebGL2.unsignedShort 0
 
-                                  worldState <- liftEffect $ Ref.read worldStateRef
-                                  for_ (Map.values worldState.sceneObjects) \obj -> do
-                                      case Map.lookup obj.geometryId worldState.gpuHandles of
+                                  updatedWorldState <- liftEffect $ Ref.read worldStateRef
+                                  for_ (Map.values updatedWorldState.sceneObjects) \obj -> do
+                                      case Map.lookup obj.geometryId updatedWorldState.gpuHandles of
                                           Nothing -> pure unit
                                           Just gpu -> do
-                                              liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false obj.transform.translation
+                                              liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false (composeModelMatrix obj.transform)
                                               liftEffect $ WebGL2.bindVertexArray xrWebGL2Context gpu.vao
                                               liftEffect $ WebGL2.drawElements xrWebGL2Context gpu.drawMode gpu.vertexCount WebGL2.unsignedShort 0 
                         case result of
