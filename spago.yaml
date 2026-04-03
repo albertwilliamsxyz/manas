@@ -11,6 +11,7 @@ package:
     - exceptions
     - maybe
     - prelude
+    - random
     - refs
     - web-dom
     - web-html

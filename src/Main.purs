@@ -17,6 +17,8 @@ import Effect.Aff (Aff, launchAff_)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
+import Effect.Random (random)
+import Effect.Ref as Ref
 import ForeignUtils as ForeignUtils
 import Web.DOM.Element as Element
 import Web.DOM.NonElementParentNode (getElementById)
@@ -32,9 +34,14 @@ import WebGL2 as WebGL2
 import WebXR as WebXR
 
 
+-- [Constants]
+
+-- [Essentials]
+
 baseNumberOfDimensions :: Int
 baseNumberOfDimensions = 3
 
+-- [WebXR / Hand Tracking]
 
 numberOfJointsPerHand :: Int
 numberOfJointsPerHand = 25
@@ -81,51 +88,41 @@ handJointIndicesByName =
     , Tuple "pinky-finger-tip" 24
     ]
 
-cubeVertices3d :: Array Number
-cubeVertices3d =
-  [ -0.1, -0.1, 0.1
-  ,  0.1, -0.1, 0.1
-  ,  0.1,  0.1, 0.1
-  , -0.1, -0.1, 0.1
-  ,  0.1,  0.1, 0.1
-  , -0.1,  0.1, 0.1
+pinchThreshold :: Number
+pinchThreshold = 0.05
 
-  ,  0.1, -0.1, -0.1
-  , -0.1, -0.1, -0.1
-  , -0.1,  0.1, -0.1
-  ,  0.1, -0.1, -0.1
-  , -0.1,  0.1, -0.1
-  ,  0.1,  0.1, -0.1
+-- [Geometry]
 
-  ,  0.1, -0.1, 0.1
-  ,  0.1, -0.1, -0.1
-  ,  0.1,  0.1, -0.1
-  ,  0.1, -0.1, 0.1
-  ,  0.1,  0.1, -0.1
-  ,  0.1,  0.1, 0.1
+cubeVertices :: Array Number
+cubeVertices =
+    [ -0.1, -0.1,  0.1   -- 0: front bottom left
+    ,  0.1, -0.1,  0.1   -- 1: front bottom right
+    ,  0.1,  0.1,  0.1   -- 2: front top right
+    , -0.1,  0.1,  0.1   -- 3: front top left
+    , -0.1, -0.1, -0.1   -- 4: back bottom left
+    ,  0.1, -0.1, -0.1   -- 5: back bottom right
+    ,  0.1,  0.1, -0.1   -- 6: back top right
+    , -0.1,  0.1, -0.1   -- 7: back top left
+    ]
 
-  , -0.1, -0.1, -0.1
-  , -0.1, -0.1, 0.1
-  , -0.1,  0.1, 0.1
-  , -0.1, -0.1, -0.1
-  , -0.1,  0.1, 0.1
-  , -0.1,  0.1, -0.1
+cubeEdgeIndices :: Array Int
+cubeEdgeIndices =
+    [ 0, 1, 1, 2, 2, 3, 3, 0   -- front face edges
+    , 4, 5, 5, 6, 6, 7, 7, 4   -- back face edges
+    , 0, 4, 1, 5, 2, 6, 3, 7   -- connecting edges
+    ]
 
-  , -0.1,  0.1, 0.1
-  ,  0.1,  0.1, 0.1
-  ,  0.1,  0.1, -0.1
-  , -0.1,  0.1, 0.1
-  ,  0.1,  0.1, -0.1
-  , -0.1,  0.1, -0.1
+cubeTriangleIndices :: Array Int
+cubeTriangleIndices =
+    [ 0, 1, 2, 0, 2, 3   -- front
+    , 5, 4, 7, 5, 7, 6   -- back
+    , 1, 5, 6, 1, 6, 2   -- right
+    , 4, 0, 3, 4, 3, 7   -- left
+    , 3, 2, 6, 3, 6, 7   -- top
+    , 4, 5, 1, 4, 1, 0   -- bottom
+    ]
 
-  , -0.1, -0.1, -0.1
-  ,  0.1, -0.1, -0.1
-  ,  0.1, -0.1, 0.1
-  , -0.1, -0.1, -0.1
-  ,  0.1, -0.1, 0.1
-  , -0.1, -0.1, 0.1
-  ]
-
+-- [Mathematics]
 
 identityMatrix4x4 :: Array Number
 identityMatrix4x4 =
@@ -138,6 +135,7 @@ identityMatrix4x4 =
 identityMatrix4x4Float32 :: ForeignUtils.Float32Array
 identityMatrix4x4Float32 = ForeignUtils.float32Array identityMatrix4x4
 
+-- [WebGL Shaders]
 
 glslVersionDirective :: String
 glslVersionDirective = "#version 300 es"
@@ -165,22 +163,156 @@ void main() {
 """
 
 
+-- [Types]
+
+-- [Geometry types]
+
+data Topology = Points | Lines | Triangles
+
+newtype GeometryId = GeometryId String
+
+derive instance eqGeometryId :: Eq GeometryId
+derive instance ordGeometryId :: Ord GeometryId
+
+type Geometry =
+    { vertices :: Array Number
+    , indices :: Maybe (Array Int)
+    , topology :: Topology
+    }
+
+type Transform = 
+    { translation :: ForeignUtils.Float32Array
+    , rotation :: ForeignUtils.Float32Array
+    , scale :: ForeignUtils.Float32Array
+    }
+
+-- [WebGL resource types]
+
+type GPUHandle =
+    { vao :: WebGL2.VertexArrayObject
+    , buffer :: WebGL2.Buffer
+    , drawMode :: Int
+    , vertexCount :: Int
+    }
+
+-- [Input types]
+
+data Handedness = LeftHand | RightHand
+
+type HandInput = { jointPositions :: ForeignUtils.Float32Array }
+
+type Hands =
+    { left :: Maybe HandInput
+    , right :: Maybe HandInput
+    }
+
+type ControllerInput = 
+    { position :: ForeignUtils.Float32Array,
+    orientation :: ForeignUtils.Float32Array 
+    }
+
+type Controllers =
+    { left :: Maybe ControllerInput
+    , right :: Maybe ControllerInput
+    }
+
+type InputState =
+    { hands :: Hands
+    , controllers :: Controllers
+    }
+
+-- [Scene types]
+
+newtype SceneObjectId = SceneObjectId String
+
+derive instance eqSceneObjectId :: Eq SceneObjectId
+derive instance ordSceneObjectId :: Ord SceneObjectId
+
+type SceneObject = 
+    { geometryId :: GeometryId
+    , transform :: Transform
+    }
+
+-- [World State type]
+
+type WorldState =
+    { geometries :: Map GeometryId Geometry
+    , gpuHandles :: Map GeometryId GPUHandle
+    , sceneObjects :: Map SceneObjectId SceneObject
+    , nextObjectId :: Int
+    , inputs :: InputState
+    }
+
+
+-- [Functions]
+
+-- [Mathematics]
+
+generateRandomTranslationMatrix4x4Float32 :: Effect (ForeignUtils.Float32Array)
+generateRandomTranslationMatrix4x4Float32 = do
+    tx <- random
+    ty <- random
+    tz <- random
+    pure $ ForeignUtils.float32Array
+        [ 1.0, 0.0, 0.0, 0.0
+        , 0.0, 1.0, 0.0, 0.0
+        , 0.0, 0.0, 1.0, 0.0
+        , tx, ty, tz, 1.0
+        ]
+
+
+-- [Utilities]
+
+topologyToDrawMode :: Topology -> Int
+topologyToDrawMode Points = WebGL2.points
+topologyToDrawMode Lines = WebGL2.lines
+topologyToDrawMode Triangles = WebGL2.triangles
+
+addCubeToScene :: ForeignUtils.Float32Array -> WorldState -> WorldState
+addCubeToScene position worldState = worldState
+    { sceneObjects = Map.insert newId newObject worldState.sceneObjects
+    , nextObjectId = worldState.nextObjectId + 1
+    }
+    where
+        newId = SceneObjectId (show worldState.nextObjectId)
+        newObject =
+            { geometryId: GeometryId "cube"
+            , transform:
+                { translation: position
+                , rotation: identityMatrix4x4Float32
+                , scale: identityMatrix4x4Float32
+                }
+            }
+
+makeTranslationMatrix :: ForeignUtils.Float32Array -> Effect ForeignUtils.Float32Array
+makeTranslationMatrix position = do
+    x <- ForeignUtils.getAt position 0
+    y <- ForeignUtils.getAt position 1
+    z <- ForeignUtils.getAt position 2
+    pure $ ForeignUtils.float32Array
+        [ 1.0, 0.0, 0.0, 0.0
+        , 0.0, 1.0, 0.0, 0.0
+        , 0.0, 0.0, 1.0, 0.0
+        , x, y, z, 1.0
+        ]
+
+
+-- [Main]
 main :: Effect Unit
 main = launchAff_ do
     result <- runExceptT do
+        -- [Getting HTML resources]
         win <- liftEffect window
         doc <- liftEffect $ document win
         nav <- liftEffect $ navigator win
-
 
         maybeApplicationCanvas <- liftEffect $ getElementById "application" (HTMLDocument.toNonElementParentNode doc)
         applicationCanvas <- except $ note "applicationCanvas not found" maybeApplicationCanvas
         applicationCanvasAsElement <- except $ note "applicationCanvas could not be converted to HTMLCanvasElement" (HTMLCanvasElement.fromElement applicationCanvas)
 
-
+        -- [Setting up WebGL2 context and resources]
         nullableWebGL2Context <- liftEffect $ WebGL2.createContext applicationCanvasAsElement
         webGL2Context <- except $ note "WebGL2 not supported" (toMaybe nullableWebGL2Context)
-
 
         nullableVertexShader <- liftEffect $ WebGL2.createShader webGL2Context WebGL2.vertexShader        
         vertexShader <- except $ note "Vertex shader could not be created" (toMaybe nullableVertexShader)
@@ -195,7 +327,6 @@ main = launchAff_ do
             else do
                 except $ Right "Vertex shader compiled successfully"
 
-                
         nullableFragmentShader <- liftEffect $ WebGL2.createShader webGL2Context WebGL2.fragmentShader
         fragmentShader <- except $ note "Fragment shader could not be created" (toMaybe nullableFragmentShader)
         liftEffect $ WebGL2.shaderSource webGL2Context fragmentShader fragmentShaderSourceCode
@@ -209,11 +340,8 @@ main = launchAff_ do
             else do
                 except $ Right "Fragment shader compiled successfully"
 
-
         nullableProgram <- liftEffect $ WebGL2.createProgram webGL2Context
         program <- except $ note "Program could not be created" (toMaybe nullableProgram)
-
-
         liftEffect $ WebGL2.attachShader webGL2Context program vertexShader
         liftEffect $ WebGL2.attachShader webGL2Context program fragmentShader
         liftEffect $ WebGL2.linkProgram webGL2Context program
@@ -229,7 +357,9 @@ main = launchAff_ do
                 liftEffect $ WebGL2.useProgram webGL2Context program
                 except $ Right "Program created successfully"
 
+        liftEffect $ WebGL2.enable webGL2Context WebGL2.depthTest
 
+        -- [Getting the WebGL location of shader attributes and uniforms, and setting up initial values]
         positionLocation <- liftEffect $ WebGL2.getAttribLocation webGL2Context program "a_position"
         _ <- if positionLocation == -1
             then except $ Left "Unable to get the location of the position attribute"
@@ -251,27 +381,79 @@ main = launchAff_ do
         colorLocation <- except $ note "Unable to get the location of the color uniform" (toMaybe nullableColorLocation)
         liftEffect $ WebGL2.uniform4fv webGL2Context colorLocation (ForeignUtils.float32Array [0.0, 0.8, 0.0, 1.0])
 
+        -- [Setting up WebGL buffers and vertex array objects / Scene Objects]
+        cubePosition <- liftEffect $ generateRandomTranslationMatrix4x4Float32
 
-        -- let cubePosition = WebGL2.float32Array [0.0, 0.0, -0.5]
-        -- let cubeRotation = WebGL2.float32Array [0.0, 0.0, 0.0]
-        -- let cubeScale = WebGL2.float32Array [1.0, 1.0, 1.0]
         nullableCubeVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
         cubeVAO <- except $ note "Cube VAO could not be created" (toMaybe nullableCubeVAO)
         nullableCubeBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
         cubeBuffer <- except $ note "Cube buffer could not be created" (toMaybe nullableCubeBuffer)
+        nullableCubeIndexBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
+        cubeIndexBuffer <- except $ note "Cube index buffer could not be created" (toMaybe nullableCubeIndexBuffer)
         liftEffect $ WebGL2.bindVertexArray webGL2Context cubeVAO
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer cubeBuffer
-        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (ForeignUtils.float32Array cubeVertices3d) WebGL2.staticDraw
+        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (ForeignUtils.float32Array cubeVertices) WebGL2.staticDraw
+        liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer cubeIndexBuffer
+        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (ForeignUtils.uint16Array cubeEdgeIndices) WebGL2.staticDraw
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
-        liftEffect $ WebGL2.enable webGL2Context WebGL2.depthTest
+        liftEffect $ WebGL2.unbindVertexArray webGL2Context
 
+        -- [WIP: Abstracting new structure]
+
+        let cubeGeometryId = GeometryId "cube"
+            cubeGeometry =
+                { vertices: cubeVertices
+                , indices: Just cubeEdgeIndices
+                , topology: Lines
+                }
+
+        let cubeGPUHandle =
+                { vao: cubeVAO
+                , buffer: cubeBuffer
+                , drawMode: topologyToDrawMode Lines
+                , vertexCount: length cubeEdgeIndices
+                }
+
+        let cubeSceneObjectId = SceneObjectId "cube-instance-1"
+            cubeSceneObject =
+                { geometryId: cubeGeometryId
+                , transform:
+                    { translation: cubePosition
+                    , rotation: identityMatrix4x4Float32
+                    , scale: identityMatrix4x4Float32
+                    }
+                }
+
+        let sceneObjects = Map.singleton cubeSceneObjectId cubeSceneObject
+            geometries = Map.singleton cubeGeometryId cubeGeometry
+            gpuHandles = Map.singleton cubeGeometryId cubeGPUHandle
+
+        let initialWorldState =
+                { geometries
+                , gpuHandles
+                , sceneObjects
+                , nextObjectId: 1
+                , inputs:
+                    { hands:
+                        { left: Nothing
+                        , right: Nothing
+                        }
+                    , controllers:
+                        { left: Nothing
+                        , right: Nothing
+                        }
+                    }
+                }
+
+        worldStateRef <- liftEffect $ Ref.new initialWorldState
+        leftWasPinchingRef <- liftEffect $ Ref.new false
+        rightWasPinchingRef <- liftEffect $ Ref.new false
 
         nullableHandSkeletonJointIndicesBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
         handSkeletonJointIndicesBuffer <- except $ note "Hand skeleton joint indices buffer could not be created" (toMaybe nullableHandSkeletonJointIndicesBuffer)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
         liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (ForeignUtils.uint16Array handSkeletonByJointIndices) WebGL2.staticDraw
-
 
         nullableLeftHandVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
         leftHandVAO <- except $ note "Left hand VAO could not be created" (toMaybe nullableLeftHandVAO)
@@ -284,6 +466,7 @@ main = launchAff_ do
         ) WebGL2.dynamicDraw
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
+        liftEffect $ WebGL2.unbindVertexArray webGL2Context
 
         nullableLeftHandSkeletonVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
         leftHandSkeletonVAO <- except $ note "Left hand skeleton VAO could not be created" (toMaybe nullableLeftHandSkeletonVAO)
@@ -292,7 +475,7 @@ main = launchAff_ do
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
-
+        liftEffect $ WebGL2.unbindVertexArray webGL2Context
 
         nullableRightHandVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
         rightHandVAO <- except $ note "Right hand VAO could not be created" (toMaybe nullableRightHandVAO)
@@ -305,6 +488,7 @@ main = launchAff_ do
         ) WebGL2.dynamicDraw
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
+        liftEffect $ WebGL2.unbindVertexArray webGL2Context
 
         nullableRightHandSkeletonVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
         rightHandSkeletonVAO <- except $ note "Right hand skeleton VAO could not be created" (toMaybe nullableRightHandSkeletonVAO)
@@ -313,12 +497,14 @@ main = launchAff_ do
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
+        liftEffect $ WebGL2.unbindVertexArray webGL2Context
 
+        -- [Starting the experience on button click and running the main loop]
         let runExperience :: Window -> Navigator -> WebGL2.RenderingContext -> Aff (Either String Unit)
             runExperience xrWin xrNav xrWebGL2Context = runExceptT do
+                -- [Getting the XR-related resources]
                 nullableXRSystem <- liftEffect $ WebXR.getXRSystem xrNav
                 xrSystem <- except $ note "WebXR not supported" (toMaybe nullableXRSystem)
-
 
                 isWebXRSessionModeSupported <- liftAff $ WebXR.isWebXRSessionModeSupported xrSystem "immersive-ar"
                 _ <- if not isWebXRSessionModeSupported
@@ -326,21 +512,20 @@ main = launchAff_ do
                     else except $ Right "WebXR session mode supported"
                 liftAff $ WebXR.makeXRWebGL2Compatible xrWebGL2Context
 
-
                 xrSession <- liftAff $ WebXR.requestSession xrSystem "immersive-ar" { requiredFeatures: ["hand-tracking"] }
                 xrGLLayer <- liftEffect $ WebXR.createXRWebGLLayer xrWin xrSession xrWebGL2Context
                 liftEffect $ WebXR.updateRenderState xrSession { baseLayer: xrGLLayer }
 
                 referenceSpace <- liftAff $ WebXR.requestReferenceSpace xrSession "local"
 
-                -- let drawingVertices = ForeignUtils.float32Array (replicate (numberOfHandJointDimensions) 0.0)
-
                 let leftHandVertices = ForeignUtils.float32Array (replicate (numberOfHandJointDimensions) 0.0)
                     rightHandVertices = ForeignUtils.float32Array (replicate (numberOfHandJointDimensions) 0.0)
 
+                -- [Callback for tick updates from the XR session]
                 let tick :: WebXR.XRFrameRequestCallback
                     tick _ frame = do
                         result <- runExceptT do
+                            -- [Managing hand tracking data]
                             inputSources <- liftEffect $ WebXR.getInputSources xrSession
                             for_ inputSources \inputSource -> void $ runExceptT do
                                 nullableHand <- liftEffect $ WebXR.getHand inputSource
@@ -372,6 +557,7 @@ main = launchAff_ do
                             liftEffect $ WebGL2.bindBuffer xrWebGL2Context WebGL2.arrayBuffer rightHandBuffer
                             liftEffect $ WebGL2.bufferSubData xrWebGL2Context WebGL2.arrayBuffer 0 rightHandVertices
 
+                            -- [Managing gestures]
                             let maybeLeftIndexFingerTipIndex = Map.lookup "index-finger-tip" handJointIndicesByName
                             let maybeLeftThumbTipIndex = Map.lookup "thumb-tip" handJointIndicesByName
                             leftIndexFingerTipIndex <- except $ note "No left index-finger-tip index" maybeLeftIndexFingerTipIndex
@@ -380,8 +566,14 @@ main = launchAff_ do
                             let leftThumbTipStart = leftThumbTipIndex * baseNumberOfDimensions
                             leftIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices leftIndexFingerTipStart (leftIndexFingerTipStart + baseNumberOfDimensions)
                             leftThumbTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices leftThumbTipStart (leftThumbTipStart + baseNumberOfDimensions)
-                            _ <- liftEffect $ ForeignUtils.get3DDistance leftIndexFingerTipPosition leftThumbTipPosition
-                            -- when (leftPinchDistance < 0.02) $ liftEffect $ log "Left hand pinch"
+                            leftThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance leftIndexFingerTipPosition leftThumbTipPosition
+                            leftWasPinching <- liftEffect $ Ref.read leftWasPinchingRef
+                            let leftIsPinching = leftThumbIndexDistance < pinchThreshold
+                            when (leftIsPinching && not leftWasPinching) do
+                                liftEffect $ log "Left pinch detected"
+                                randomTranslationMatrix <- liftEffect $ generateRandomTranslationMatrix4x4Float32
+                                liftEffect $ Ref.modify_ (addCubeToScene randomTranslationMatrix) worldStateRef 
+                            liftEffect $ Ref.write leftIsPinching leftWasPinchingRef
 
                             let maybeRightIndexFingerTipIndex = Map.lookup "index-finger-tip" handJointIndicesByName
                             let maybeRightThumbTipIndex = Map.lookup "thumb-tip" handJointIndicesByName
@@ -391,10 +583,16 @@ main = launchAff_ do
                             let rightThumbTipStart = rightThumbTipIndex * baseNumberOfDimensions
                             rightIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices rightIndexFingerTipStart (rightIndexFingerTipStart + baseNumberOfDimensions)
                             rightThumbTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices rightThumbTipStart (rightThumbTipStart + baseNumberOfDimensions)
-                            _ <- liftEffect $ ForeignUtils.get3DDistance rightIndexFingerTipPosition rightThumbTipPosition
-                            -- when (rightPinchDistance < 0.02) $ liftEffect $ log "Right hand pinch"
+                            rightThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance rightIndexFingerTipPosition rightThumbTipPosition
+                            rightWasPinching <- liftEffect $ Ref.read rightWasPinchingRef
+                            let rightIsPinching = rightThumbIndexDistance < pinchThreshold
+                            when (rightIsPinching && not rightWasPinching) do
+                                liftEffect $ log "Right pinch detected"
+                                translationMatrix <- liftEffect $ makeTranslationMatrix rightIndexFingerTipPosition
+                                liftEffect $ Ref.modify_ (addCubeToScene translationMatrix) worldStateRef
+                            liftEffect $ Ref.write rightIsPinching rightWasPinchingRef
 
-                            -- Always clear the framebuffer, even if tracking is lost
+                            -- [Managing rendering]
                             framebuffer <- liftEffect $ WebXR.getFramebuffer xrGLLayer
                             liftEffect $ WebGL2.bindFramebuffer xrWebGL2Context WebGL2.framebuffer framebuffer
                             liftEffect $ WebGL2.clearColor xrWebGL2Context 0.0 0.0 0.0 1.0
@@ -406,16 +604,19 @@ main = launchAff_ do
                               Just viewerPose -> do
                                 views <- liftEffect $ WebXR.getViews viewerPose
                                 for_ views \view -> do
+                                  -- [Managing rendering for each view (eye)]
                                   nullableViewport <- liftEffect $ WebXR.getViewport xrGLLayer view
                                   viewport <- except $ note "no viewport" (toMaybe nullableViewport)
                                   liftEffect $ WebGL2.viewport xrWebGL2Context viewport.x viewport.y viewport.width viewport.height
 
+                                  -- [Sending data to WebGL2 to have the context render the scene from the perspective of the current view]
                                   projectionMatrix <- liftEffect $ WebXR.getProjectionMatrix view
                                   viewMatrix <- liftEffect $ WebXR.getViewMatrix view
                                   liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context projectionLocation false projectionMatrix
                                   liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context viewLocation false viewMatrix
                                   liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false identityMatrix4x4Float32
 
+                                  -- [Rendering]
                                   liftEffect $ WebGL2.bindVertexArray xrWebGL2Context leftHandVAO
                                   liftEffect $ WebGL2.drawArrays xrWebGL2Context WebGL2.points 0 numberOfJointsPerHand
 
@@ -428,8 +629,14 @@ main = launchAff_ do
                                   liftEffect $ WebGL2.bindVertexArray xrWebGL2Context rightHandSkeletonVAO
                                   liftEffect $ WebGL2.drawElements xrWebGL2Context WebGL2.lines (length handSkeletonByJointIndices) WebGL2.unsignedShort 0
 
-                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context cubeVAO
-                                  liftEffect $ WebGL2.drawArrays xrWebGL2Context WebGL2.points 0 (length cubeVertices3d / 3)
+                                  worldState <- liftEffect $ Ref.read worldStateRef
+                                  for_ (Map.values worldState.sceneObjects) \obj -> do
+                                      case Map.lookup obj.geometryId worldState.gpuHandles of
+                                          Nothing -> pure unit
+                                          Just gpu -> do
+                                              liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false obj.transform.translation
+                                              liftEffect $ WebGL2.bindVertexArray xrWebGL2Context gpu.vao
+                                              liftEffect $ WebGL2.drawElements xrWebGL2Context gpu.drawMode gpu.vertexCount WebGL2.unsignedShort 0 
                         case result of
                             Left err -> log err
                             Right _ -> pure unit
@@ -438,6 +645,7 @@ main = launchAff_ do
                 _ <- liftEffect $ WebXR.requestAnimationFrame xrSession tick
                 pure unit
 
+        -- [Adding event listener to the start experience button]
         maybeStartButton <- liftEffect $ getElementById "start-experience" (HTMLDocument.toNonElementParentNode doc)
         startButtonElement <- except $ note "Start experience button not found" maybeStartButton
         maybeStartButtonAsHtmlButtonElement <- pure $ HTMLButtonElement.fromElement startButtonElement
@@ -450,6 +658,7 @@ main = launchAff_ do
                 Right _ -> pure unit
         _ <- liftEffect $ EventTarget.addEventListener (EventType "click") listener false eventTarget
         except $ Right "Start experience button event listener added successfully"
+    -- [Logging any errors or messages that may have arised during the setup process]
     liftEffect $ case result of
         Left errorMessage -> log errorMessage
         Right message -> log message

@@ -81,6 +81,8 @@ foreign import createVertexArray
     :: RenderingContext -> Effect (Nullable VertexArrayObject)
 foreign import bindVertexArray
     :: RenderingContext -> VertexArrayObject -> Effect Unit
+foreign import unbindVertexArray
+    :: RenderingContext -> Effect Unit
 
 
 foreign import data Buffer :: Type
@@ -143,6 +145,9 @@ points = 0x0000
 
 lines :: Int
 lines = 0x0001
+
+triangles :: Int
+triangles = 0x0002
 
 unsignedShort :: Int
 unsignedShort = 0x1403
