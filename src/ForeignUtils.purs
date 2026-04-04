@@ -48,3 +48,11 @@ foreign import transformPoint3 :: Float32Array -> Float32Array -> Float32Array
 foreign import translationMatrix4x4 :: Float32Array -> Float32Array
 
 foreign import getTranslationFromMatrix :: Float32Array -> Float32Array
+
+foreign import midpoint3 :: Float32Array -> Float32Array -> Float32Array
+
+foreign import add3 :: Float32Array -> Float32Array -> Float32Array
+
+foreign import getScaleFromMatrix :: Float32Array -> Number
+
+foreign import axisAngleRotationMatrix :: Float32Array -> Number -> Number -> Float32Array

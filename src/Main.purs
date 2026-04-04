@@ -11,6 +11,7 @@ import Data.Map (Map, fromFoldable)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Nullable (toMaybe)
+import Data.Number as Math
 import Data.Tuple (Tuple(..), fst)
 import Effect (Effect)
 import Effect.Aff (Aff, launchAff_)
@@ -230,10 +231,32 @@ type InputState =
 
 -- [Interaction types]
 
-type GrabState =
-    { heldObject :: Maybe SceneObjectId
-    , grabOffset :: Maybe ForeignUtils.Float32Array
-    , wasPinching :: Boolean
+data InteractionMode
+    = Observing
+    | OneHandManipulate
+        { hand :: Handedness
+        , objectId :: SceneObjectId
+        , grabOffset :: ForeignUtils.Float32Array
+        }
+    | TwoHandManipulate
+        { objectId :: SceneObjectId
+        , initialMidpoint :: ForeignUtils.Float32Array
+        , initialDistance :: Number
+        , initialDirection :: ForeignUtils.Float32Array
+        , initialScale :: ForeignUtils.Float32Array
+        , initialRotation :: ForeignUtils.Float32Array
+        , initialTranslation :: ForeignUtils.Float32Array
+        }
+
+type HandState =
+    { pinching :: Boolean
+    , position :: ForeignUtils.Float32Array
+    }
+
+type InteractionResult =
+    { mode :: InteractionMode
+    , sceneObjects :: Map SceneObjectId SceneObject
+    , shouldSpawn :: Maybe { hand :: Handedness, position :: ForeignUtils.Float32Array }
     }
 
 -- [Scene types]
@@ -256,7 +279,7 @@ type WorldState =
     , sceneObjects :: Map SceneObjectId SceneObject
     , nextObjectId :: Int
     , inputs :: InputState
-    , interaction :: { left :: GrabState, right :: GrabState }
+    , interaction :: InteractionMode
     }
 
 
@@ -406,13 +429,14 @@ findNearestObject pinchPoint sceneObjects =
     go (Map.toUnfoldable sceneObjects :: Array (Tuple SceneObjectId SceneObject)) Nothing
     where
     grabRadius = 0.15
-
     go entries acc = case uncons entries of
         Nothing -> fst <$> acc
         Just { head: Tuple objId obj, tail: rest } ->
             let modelMatrix = composeModelMatrix obj.transform
                 dist = ForeignUtils.get3DDistanceFromMatrix pinchPoint modelMatrix
-            in if dist < grabRadius
+                objScale = ForeignUtils.getScaleFromMatrix modelMatrix
+                adjustedRadius = grabRadius * objScale
+            in if dist < adjustedRadius
                 then case acc of
                     Nothing -> go rest (Just (Tuple objId dist))
                     Just (Tuple _ prevDist) 
@@ -420,36 +444,114 @@ findNearestObject pinchPoint sceneObjects =
                         | otherwise -> go rest acc
                 else go rest acc
 
-updateGrab 
-    :: Boolean
-    -> ForeignUtils.Float32Array
-    -> Maybe { id :: SceneObjectId, position :: ForeignUtils.Float32Array }
-    -> GrabState
-    -> GrabState
-updateGrab isPinching pinchPosition hitResult grabState = 
-    let result = case isPinching, grabState.heldObject of
-            false, Nothing -> grabState
-            false, Just _  -> grabState { heldObject = Nothing, grabOffset = Nothing }
-            true, Just _   -> grabState
-            true, Nothing  -> case hitResult of
-                Nothing -> grabState
-                Just hit -> grabState 
-                    { heldObject = Just hit.id
-                    , grabOffset = Just (ForeignUtils.sub3 pinchPosition hit.position)
+updateInteraction 
+    :: HandState
+    -> HandState
+    -> Map SceneObjectId SceneObject
+    -> InteractionMode
+    -> InteractionResult
+updateInteraction left right sceneObjects mode = case mode of
+    Observing -> case left.pinching, right.pinching of
+        true, _ -> tryGrab LeftHand left.position
+        _, true -> tryGrab RightHand right.position
+        _, _ -> idle
+    OneHandManipulate state -> case state.hand of
+        LeftHand 
+            | not left.pinching -> idle
+            | right.pinching -> enterTwoHand left.position right.position state
+            | otherwise -> applyOneHand left.position state
+        RightHand
+            | not right.pinching -> idle
+            | left.pinching -> enterTwoHand left.position right.position state
+            | otherwise -> applyOneHand right.position state
+    TwoHandManipulate state -> case left.pinching, right.pinching of
+        false, false -> idle
+        true, false -> 
+            case Map.lookup state.objectId sceneObjects of
+                Just obj -> 
+                    let objPos = ForeignUtils.getTranslationFromMatrix (composeModelMatrix obj.transform)
+                    in { mode: OneHandManipulate { hand: LeftHand, objectId: state.objectId, grabOffset: ForeignUtils.sub3 left.position objPos }
+                       , sceneObjects
+                       , shouldSpawn: Nothing
+                       }
+                Nothing -> idle
+        false, true ->
+            case Map.lookup state.objectId sceneObjects of
+                Just obj -> 
+                    let objPos = ForeignUtils.getTranslationFromMatrix (composeModelMatrix obj.transform)
+                    in { mode: OneHandManipulate { hand: RightHand, objectId: state.objectId, grabOffset: ForeignUtils.sub3 right.position objPos }
+                       , sceneObjects
+                       , shouldSpawn: Nothing
+                       }
+                Nothing -> idle
+        true, true -> applyTwoHand left.position right.position state
+    where
+    idle = { mode: Observing, sceneObjects, shouldSpawn: Nothing }
+    tryGrab hand pos = 
+        case findNearestObject pos sceneObjects of
+            Just objId -> case Map.lookup objId sceneObjects of
+                Just obj -> 
+                    let objPos = ForeignUtils.getTranslationFromMatrix (composeModelMatrix obj.transform)
+                    in { mode: OneHandManipulate { hand, objectId: objId, grabOffset: ForeignUtils.sub3 pos objPos }
+                       , sceneObjects
+                       , shouldSpawn: Nothing
+                       }
+                Nothing -> idle
+            Nothing -> { mode: Observing, sceneObjects, shouldSpawn: Just { hand, position: pos } }
+    applyOneHand pos state = 
+        let newPos = ForeignUtils.sub3 pos state.grabOffset
+            newSceneObjects = Map.update (\obj -> Just obj { transform = obj.transform { translation = ForeignUtils.translationMatrix4x4 newPos } }) state.objectId sceneObjects
+        in { mode: OneHandManipulate state, sceneObjects: newSceneObjects, shouldSpawn: Nothing }
+    enterTwoHand leftPos rightPos state = 
+        case Map.lookup state.objectId sceneObjects of
+            Just obj -> 
+                { mode: TwoHandManipulate
+                    { objectId: state.objectId
+                    , initialMidpoint: ForeignUtils.midpoint3 leftPos rightPos
+                    , initialDistance: ForeignUtils.get3DDistanceFromMatrix leftPos (ForeignUtils.translationMatrix4x4 rightPos)
+                    , initialDirection: ForeignUtils.normalize3 (ForeignUtils.sub3 rightPos leftPos)
+                    , initialScale: obj.transform.scale
+                    , initialRotation: obj.transform.rotation
+                    , initialTranslation: obj.transform.translation
                     }
-    in result { wasPinching = isPinching }
+                , sceneObjects
+                , shouldSpawn: Nothing
+                }
+            Nothing -> idle
+    applyTwoHand leftPos rightPos state =
+        let currentMidpoint = ForeignUtils.midpoint3 leftPos rightPos
+            currentDistance = ForeignUtils.get3DDistanceFromMatrix leftPos (ForeignUtils.translationMatrix4x4 rightPos)
+            scaleFactor = currentDistance / state.initialDistance
 
-applyGrab 
-    :: ForeignUtils.Float32Array
-    -> GrabState
-    -> Map SceneObjectId SceneObject
-    -> Map SceneObjectId SceneObject
-applyGrab pinchPosition grabState sceneObjects = 
-    case grabState.heldObject, grabState.grabOffset of
-        Just objId, Just offset ->
-            let newPosition = ForeignUtils.sub3 pinchPosition offset
-            in Map.update (\obj -> Just obj { transform = obj.transform { translation = ForeignUtils.translationMatrix4x4 newPosition } }) objId sceneObjects
-        _, _ -> sceneObjects
+            initialPos = ForeignUtils.getTranslationFromMatrix state.initialTranslation
+            midpointDelta = ForeignUtils.sub3 currentMidpoint state.initialMidpoint
+            newTranslation = ForeignUtils.translationMatrix4x4 (ForeignUtils.add3 initialPos midpointDelta)
+
+            newScale = ForeignUtils.float32Array
+                [ scaleFactor, 0.0, 0.0, 0.0
+                , 0.0, scaleFactor, 0.0, 0.0
+                , 0.0, 0.0, scaleFactor, 0.0
+                , 0.0, 0.0, 0.0, 1.0
+                ]
+
+            currentDirection = ForeignUtils.normalize3 (ForeignUtils.sub3 rightPos leftPos)
+            rotationAxis = ForeignUtils.cross3 state.initialDirection currentDirection
+            axisLength = ForeignUtils.dot3 rotationAxis rotationAxis
+            cosAngle = ForeignUtils.dot3 state.initialDirection currentDirection
+            newRotation = if axisLength < 0.000001
+                then state.initialRotation
+                else ForeignUtils.multiplyMatrix4x4 
+                    (ForeignUtils.axisAngleRotationMatrix (ForeignUtils.normalize3 rotationAxis) cosAngle (Math.sqrt axisLength))
+                    state.initialRotation
+
+            newSceneObjects = Map.update (\obj -> Just obj 
+                { transform = obj.transform 
+                    { translation = newTranslation
+                    , scale = newScale
+                    , rotation = newRotation
+                    }
+                }) state.objectId sceneObjects
+        in { mode: TwoHandManipulate state, sceneObjects: newSceneObjects, shouldSpawn: Nothing }
 
 
 -- [Main]
@@ -579,10 +681,7 @@ main = launchAff_ do
                         , right: Nothing
                         }
                     }
-                , interaction:
-                    { left: { heldObject: Nothing, grabOffset: Nothing, wasPinching: false }
-                    , right: { heldObject: Nothing, grabOffset: Nothing, wasPinching: false }
-                    }
+                , interaction: Observing
                 }
 
         worldStateRef <- liftEffect $ Ref.new initialWorldState
@@ -695,9 +794,6 @@ main = launchAff_ do
                             liftEffect $ WebGL2.bufferSubData xrWebGL2Context WebGL2.arrayBuffer 0 rightHandVertices
 
                             -- [Managing gestures]
-
-                            worldState <- liftEffect $ Ref.read worldStateRef
-
                             let maybeIndexFingerTipIndex = Map.lookup "index-finger-tip" handJointIndicesByName
                             let maybeThumbTipIndex = Map.lookup "thumb-tip" handJointIndicesByName
                             indexFingerTipIndex <- except $ note "No index-finger-tip index" maybeIndexFingerTipIndex
@@ -705,47 +801,32 @@ main = launchAff_ do
                             let indexFingerTipStart = indexFingerTipIndex * baseNumberOfDimensions
                             let thumbTipStart = thumbTipIndex * baseNumberOfDimensions
 
-                            rightIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices indexFingerTipStart (indexFingerTipStart + baseNumberOfDimensions)
-                            rightThumbTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices thumbTipStart (thumbTipStart + baseNumberOfDimensions)
-                            rightThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance rightIndexFingerTipPosition rightThumbTipPosition
-                            let rightIsPinching = rightThumbIndexDistance < pinchThreshold
-                            let rightHit = case rightIsPinching, worldState.interaction.right.heldObject of
-                                    true, Nothing ->
-                                        case findNearestObject rightIndexFingerTipPosition worldState.sceneObjects of
-                                            Just objId -> case Map.lookup objId worldState.sceneObjects of
-                                                Just obj -> Just { id: objId, position: ForeignUtils.getTranslationFromMatrix (composeModelMatrix obj.transform) }
-                                                Nothing -> Nothing
-                                            Nothing -> Nothing
-                                    _, _ -> Nothing
-                            let rightHandUpdate = updateGrab rightIsPinching rightIndexFingerTipPosition rightHit worldState.interaction.right
-                            let rightSceneObjects = applyGrab rightIndexFingerTipPosition rightHandUpdate worldState.sceneObjects
-
                             leftIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices indexFingerTipStart (indexFingerTipStart + baseNumberOfDimensions)
                             leftThumbTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices thumbTipStart (thumbTipStart + baseNumberOfDimensions)
                             leftThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance leftIndexFingerTipPosition leftThumbTipPosition
                             let leftIsPinching = leftThumbIndexDistance < pinchThreshold
-                            let leftHit = case leftIsPinching, worldState.interaction.left.heldObject of
-                                    true, Nothing ->
-                                        case findNearestObject leftIndexFingerTipPosition rightSceneObjects of
-                                            Just objId -> case Map.lookup objId rightSceneObjects of
-                                                Just obj -> Just { id: objId, position: ForeignUtils.getTranslationFromMatrix (composeModelMatrix obj.transform) }
-                                                Nothing -> Nothing
-                                            Nothing -> Nothing
-                                    _, _ -> Nothing
-                            let leftHandUpdate = updateGrab leftIsPinching leftIndexFingerTipPosition leftHit worldState.interaction.left
-                            let finalSceneObjects = applyGrab leftIndexFingerTipPosition leftHandUpdate rightSceneObjects
+
+                            rightIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices indexFingerTipStart (indexFingerTipStart + baseNumberOfDimensions)
+                            rightThumbTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices thumbTipStart (thumbTipStart + baseNumberOfDimensions)
+                            rightThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance rightIndexFingerTipPosition rightThumbTipPosition
+                            let rightIsPinching = rightThumbIndexDistance < pinchThreshold
+
+                            worldState <- liftEffect $ Ref.read worldStateRef
+
+                            let leftHand = { pinching: leftIsPinching, position: leftIndexFingerTipPosition }
+                            let rightHand = { pinching: rightIsPinching, position: rightIndexFingerTipPosition }
+                            let interactionResult = updateInteraction leftHand rightHand worldState.sceneObjects worldState.interaction
 
                             liftEffect $ Ref.modify_ (\ws -> ws 
-                                { sceneObjects = finalSceneObjects
-                                , interaction = { right: rightHandUpdate, left: leftHandUpdate }
+                                { sceneObjects = interactionResult.sceneObjects
+                                , interaction = interactionResult.mode
                                 }) worldStateRef
 
-                            let leftJustStartedPinching = leftIsPinching && not worldState.interaction.left.wasPinching
-                            case leftHit of
-                                Nothing -> when leftJustStartedPinching do
-                                    translationMatrix <- liftEffect $ makeTranslationMatrix leftIndexFingerTipPosition
+                            case interactionResult.shouldSpawn of
+                                Just spawn -> do
+                                    translationMatrix <- liftEffect $ makeTranslationMatrix spawn.position
                                     liftEffect $ Ref.modify_ (addCubeToScene translationMatrix) worldStateRef
-                                _ -> pure unit
+                                Nothing -> pure unit
 
                             -- [Managing rendering]
                             framebuffer <- liftEffect $ WebXR.getFramebuffer xrGLLayer

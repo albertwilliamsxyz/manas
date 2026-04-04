@@ -124,3 +124,29 @@ export const translationMatrix4x4 = (v) => new Float32Array([
 
 export const getTranslationFromMatrix = (matrix) =>
   new Float32Array([matrix[12], matrix[13], matrix[14]]);
+
+export const midpoint3 = (a) => (b) => new Float32Array([
+  (a[0] + b[0]) / 2,
+  (a[1] + b[1]) / 2,
+  (a[2] + b[2]) / 2
+]);
+
+export const add3 = (a) => (b) => new Float32Array([
+  a[0] + b[0], a[1] + b[1], a[2] + b[2]
+]);
+
+export const getScaleFromMatrix = (matrix) => {
+  const sx = Math.sqrt(matrix[0] * matrix[0] + matrix[1] * matrix[1] + matrix[2] * matrix[2]);
+  return sx;
+};
+
+export const axisAngleRotationMatrix = (axis) => (cosAngle) => (sinAngle) => {
+  const x = axis[0], y = axis[1], z = axis[2];
+  const c = cosAngle, s = sinAngle, t = 1 - c;
+  return new Float32Array([
+    t * x * x + c, t * x * y + s * z, t * x * z - s * y, 0,
+    t * x * y - s * z, t * y * y + c, t * y * z + s * x, 0,
+    t * x * z + s * y, t * y * z - s * x, t * z * z + c, 0,
+    0, 0, 0, 1
+  ]);
+};
