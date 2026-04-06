@@ -1,0 +1,9 @@
+- [Albert - Project Creator](user_profile.md) — PureScript/WebXR developer building Manas, uses Neovim, macOS
+- [Prefer simple commands](feedback_prefer_mv.md) — Use the simplest atomic operation, don't over-engineer shell commands
+- [Type honesty in math](feedback_type_honesty.md) — Vec3/Mat4 newtypes over Float32Array, not raw Float32Array in signatures
+- [Progressive crystallization](feedback_progressive_crystallization.md) — Comments → names → types → functions → modules. Never skip steps.
+- [Module structure](feedback_module_structure.md) — FFI modules: two flat sub-layers (raw binding + idiomatic PureScript)
+- [Pipelines as thinking tool](feedback_pipelines.md) — Pipelines are why Albert chose PureScript. Extract clear pipeline stages.
+- [Parse don't validate](feedback_parse_dont_validate.md) — Validate at boundaries, construct domain types, internal ops stay simple and total.
+- [Four axioms](project_axioms.md) — Honest representation, Composition, Minimal knowledge, Essential over accidental. Derive principles from these.
+- [Understanding over execution](feedback_understanding_over_execution.md) — Deep understanding is the bottleneck, not code. Don't rush to implement.

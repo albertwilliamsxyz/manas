@@ -6,6 +6,7 @@ import Data.Nullable (Nullable)
 import Effect (Effect)
 
 
+-- [TypedArray Primitives]
 foreign import data Float32Array :: Type
 foreign import float32Array :: forall a. a -> Float32Array
 
@@ -20,6 +21,7 @@ foreign import copyInto :: Float32Array -> Float32Array -> Int -> Effect Unit
 
 foreign import subarray :: Float32Array -> Int -> Int -> Effect Float32Array
 
+-- [Vec3 Operations]
 foreign import get3DDistance :: Float32Array -> Float32Array -> Effect Number
 
 foreign import get3DDistanceFromMatrix :: Float32Array -> Float32Array -> Number
