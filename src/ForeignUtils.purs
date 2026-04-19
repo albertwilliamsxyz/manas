@@ -4,13 +4,12 @@ import Prelude
 
 import Data.Nullable (Nullable)
 import Effect (Effect)
+import Primitives (Float32Array, Uint16Array)
 
 
 -- [TypedArray Primitives]
-foreign import data Float32Array :: Type
 foreign import float32Array :: forall a. a -> Float32Array
 
-foreign import data Uint16Array :: Type
 foreign import uint16Array :: forall a. a -> Uint16Array
 
 foreign import getAt :: Float32Array -> Int -> Effect Number

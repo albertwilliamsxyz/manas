@@ -11,7 +11,7 @@ import Data.Map (Map, fromFoldable)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Nullable (toMaybe)
-import Data.Number as Math
+import Data.Number as Number
 import Data.Tuple (Tuple(..), fst)
 import Effect (Effect)
 import Effect.Aff (Aff, launchAff_)
@@ -21,6 +21,8 @@ import Effect.Console (log)
 import Effect.Random (random)
 import Effect.Ref as Ref
 import ForeignUtils as ForeignUtils
+import Math as Math
+import Primitives as Primitives
 import Web.DOM.Element as Element
 import Web.DOM.NonElementParentNode (getElementById)
 import Web.Event.Event (EventType(..))
@@ -133,8 +135,18 @@ identityMatrix4x4 =
   , 0.0, 0.0, 0.0, 1.0
   ]
 
-identityMatrix4x4Float32 :: ForeignUtils.Float32Array
+identityMatrix4x4Float32 :: Primitives.Float32Array
 identityMatrix4x4Float32 = ForeignUtils.float32Array identityMatrix4x4
+
+-- [Vec3 Conversion]
+
+readVec3At :: Primitives.Float32Array -> Int -> Effect Math.Vec3
+readVec3At arr index = do
+  let offset = index * 3
+  x <- ForeignUtils.getAt arr offset
+  y <- ForeignUtils.getAt arr (offset + 1)
+  z <- ForeignUtils.getAt arr (offset + 2)
+  pure (Math.vec3 x y z)
 
 -- [WebGL Shaders]
 
@@ -183,14 +195,14 @@ type Geometry =
     }
 
 type Transform = 
-    { translation :: ForeignUtils.Float32Array
-    , rotation :: ForeignUtils.Float32Array
-    , scale :: ForeignUtils.Float32Array
+    { translation :: Primitives.Float32Array
+    , rotation :: Primitives.Float32Array
+    , scale :: Primitives.Float32Array
     }
 
 type Ray = 
-    { origin :: ForeignUtils.Float32Array
-    , direction :: ForeignUtils.Float32Array
+    { origin :: Primitives.Float32Array
+    , direction :: Primitives.Float32Array
     }
 
 -- [WebGL resource types]
@@ -207,7 +219,7 @@ type GPUHandle =
 
 data Handedness = LeftHand | RightHand
 
-type HandInput = { jointPositions :: ForeignUtils.Float32Array }
+type HandInput = { jointPositions :: Primitives.Float32Array }
 
 type Hands =
     { left :: Maybe HandInput
@@ -215,8 +227,8 @@ type Hands =
     }
 
 type ControllerInput = 
-    { position :: ForeignUtils.Float32Array,
-    orientation :: ForeignUtils.Float32Array 
+    { position :: Primitives.Float32Array,
+    orientation :: Primitives.Float32Array 
     }
 
 type Controllers =
@@ -236,27 +248,27 @@ data InteractionMode
     | OneHandManipulate
         { hand :: Handedness
         , objectId :: SceneObjectId
-        , grabOffset :: ForeignUtils.Float32Array
+        , grabOffset :: Primitives.Float32Array
         }
     | TwoHandManipulate
         { objectId :: SceneObjectId
-        , initialMidpoint :: ForeignUtils.Float32Array
+        , initialMidpoint :: Primitives.Float32Array
         , initialDistance :: Number
-        , initialDirection :: ForeignUtils.Float32Array
-        , initialScale :: ForeignUtils.Float32Array
-        , initialRotation :: ForeignUtils.Float32Array
-        , initialTranslation :: ForeignUtils.Float32Array
+        , initialDirection :: Primitives.Float32Array
+        , initialScale :: Primitives.Float32Array
+        , initialRotation :: Primitives.Float32Array
+        , initialTranslation :: Primitives.Float32Array
         }
 
 type HandState =
     { pinching :: Boolean
-    , position :: ForeignUtils.Float32Array
+    , position :: Primitives.Float32Array
     }
 
 type InteractionResult =
     { mode :: InteractionMode
     , sceneObjects :: Map SceneObjectId SceneObject
-    , shouldSpawn :: Maybe { hand :: Handedness, position :: ForeignUtils.Float32Array }
+    , shouldSpawn :: Maybe { hand :: Handedness, position :: Primitives.Float32Array }
     }
 
 -- [Scene types]
@@ -287,7 +299,7 @@ type WorldState =
 
 -- [Mathematics]
 
-generateRandomTranslationMatrix4x4Float32 :: Effect (ForeignUtils.Float32Array)
+generateRandomTranslationMatrix4x4Float32 :: Effect (Primitives.Float32Array)
 generateRandomTranslationMatrix4x4Float32 = do
     tx <- random
     ty <- random
@@ -299,7 +311,7 @@ generateRandomTranslationMatrix4x4Float32 = do
         , tx, ty, tz, 1.0
         ]
 
-getVertex :: Array Number -> Int -> ForeignUtils.Float32Array
+getVertex :: Array Number -> Int -> Primitives.Float32Array
 getVertex vertices i = 
     let offset = i * 3
         x = fromMaybe 0.0 (vertices !! offset)
@@ -308,8 +320,8 @@ getVertex vertices i =
     in ForeignUtils.float32Array [x, y, z]
 
 rayMeshIntersect 
-    :: { origin :: ForeignUtils.Float32Array, direction :: ForeignUtils.Float32Array } 
-    -> ForeignUtils.Float32Array 
+    :: { origin :: Primitives.Float32Array, direction :: Primitives.Float32Array } 
+    -> Primitives.Float32Array 
     -> Geometry 
     -> Maybe Number
 rayMeshIntersect ray modelMatrix geometry = 
@@ -344,7 +356,7 @@ topologyToDrawMode Points = WebGL2.points
 topologyToDrawMode Lines = WebGL2.lines
 topologyToDrawMode Triangles = WebGL2.triangles
 
-addCubeToScene :: ForeignUtils.Float32Array -> WorldState -> WorldState
+addCubeToScene :: Primitives.Float32Array -> WorldState -> WorldState
 addCubeToScene position worldState = worldState
     { sceneObjects = Map.insert newId newObject worldState.sceneObjects
     , nextObjectId = worldState.nextObjectId + 1
@@ -383,7 +395,7 @@ uploadGeometry webGL2Context positionLocation geometry = do
          , vertexCount: length geometry.edgeIndices
          }
 
-makeTranslationMatrix :: ForeignUtils.Float32Array -> Effect ForeignUtils.Float32Array
+makeTranslationMatrix :: Primitives.Float32Array -> Effect Primitives.Float32Array
 makeTranslationMatrix position = do
     x <- ForeignUtils.getAt position 0
     y <- ForeignUtils.getAt position 1
@@ -395,13 +407,13 @@ makeTranslationMatrix position = do
         , x, y, z, 1.0
         ]
 
-composeModelMatrix :: Transform -> ForeignUtils.Float32Array
+composeModelMatrix :: Transform -> Primitives.Float32Array
 composeModelMatrix transform = 
     ForeignUtils.multiplyMatrix4x4 transform.translation 
         (ForeignUtils.multiplyMatrix4x4 transform.rotation transform.scale)
 
 findHitObject 
-    :: { origin :: ForeignUtils.Float32Array, direction :: ForeignUtils.Float32Array }
+    :: { origin :: Primitives.Float32Array, direction :: Primitives.Float32Array }
     -> WorldState 
     -> Maybe SceneObjectId
 findHitObject ray worldState = 
@@ -422,7 +434,7 @@ findHitObject ray worldState =
                         _, _ -> go rest acc
 
 findNearestObject 
-    :: ForeignUtils.Float32Array
+    :: Primitives.Float32Array
     -> Map SceneObjectId SceneObject
     -> Maybe SceneObjectId
 findNearestObject pinchPoint sceneObjects = 
@@ -541,7 +553,7 @@ updateInteraction left right sceneObjects mode = case mode of
             newRotation = if axisLength < 0.000001
                 then state.initialRotation
                 else ForeignUtils.multiplyMatrix4x4 
-                    (ForeignUtils.axisAngleRotationMatrix (ForeignUtils.normalize3 rotationAxis) cosAngle (Math.sqrt axisLength))
+                    (ForeignUtils.axisAngleRotationMatrix (ForeignUtils.normalize3 rotationAxis) cosAngle (Number.sqrt axisLength))
                     state.initialRotation
 
             newSceneObjects = Map.update (\obj -> Just obj 
@@ -817,23 +829,20 @@ main = launchAff_ do
                             let maybeThumbTipIndex = Map.lookup "thumb-tip" handJointIndicesByName
                             indexFingerTipIndex <- except $ note "No index-finger-tip index" maybeIndexFingerTipIndex
                             thumbTipIndex <- except $ note "No thumb-tip index" maybeThumbTipIndex
-                            let indexFingerTipStart = indexFingerTipIndex * baseNumberOfDimensions
-                            let thumbTipStart = thumbTipIndex * baseNumberOfDimensions
-
-                            leftIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices indexFingerTipStart (indexFingerTipStart + baseNumberOfDimensions)
-                            leftThumbTipPosition <- liftEffect $ ForeignUtils.subarray leftHandVertices thumbTipStart (thumbTipStart + baseNumberOfDimensions)
-                            leftThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance leftIndexFingerTipPosition leftThumbTipPosition
+                            leftIndexFingerTipPosition <- liftEffect $ readVec3At leftHandVertices indexFingerTipIndex
+                            leftThumbTipPosition <- liftEffect $ readVec3At leftHandVertices thumbTipIndex
+                            let leftThumbIndexDistance = Math.distance leftIndexFingerTipPosition leftThumbTipPosition
                             let leftIsPinching = leftThumbIndexDistance < pinchThreshold
 
-                            rightIndexFingerTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices indexFingerTipStart (indexFingerTipStart + baseNumberOfDimensions)
-                            rightThumbTipPosition <- liftEffect $ ForeignUtils.subarray rightHandVertices thumbTipStart (thumbTipStart + baseNumberOfDimensions)
-                            rightThumbIndexDistance <- liftEffect $ ForeignUtils.get3DDistance rightIndexFingerTipPosition rightThumbTipPosition
+                            rightIndexFingerTipPosition <- liftEffect $ readVec3At rightHandVertices indexFingerTipIndex
+                            rightThumbTipPosition <- liftEffect $ readVec3At rightHandVertices thumbTipIndex
+                            let rightThumbIndexDistance = Math.distance rightIndexFingerTipPosition rightThumbTipPosition
                             let rightIsPinching = rightThumbIndexDistance < pinchThreshold
 
                             worldState <- liftEffect $ Ref.read worldStateRef
 
-                            let leftHand = { pinching: leftIsPinching, position: leftIndexFingerTipPosition }
-                            let rightHand = { pinching: rightIsPinching, position: rightIndexFingerTipPosition }
+                            let leftHand = { pinching: leftIsPinching, position: Math.toFloat32Array leftIndexFingerTipPosition }
+                            let rightHand = { pinching: rightIsPinching, position: Math.toFloat32Array rightIndexFingerTipPosition }
                             let interactionResult = updateInteraction leftHand rightHand worldState.sceneObjects worldState.interaction
 
                             liftEffect $ Ref.modify_ (\ws -> ws 

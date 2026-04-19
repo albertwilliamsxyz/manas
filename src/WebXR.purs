@@ -9,7 +9,7 @@ import Effect.Aff (Aff)
 import Web.HTML (Navigator)
 import Web.HTML.Window (Window)
 import WebGL2 (RenderingContext)
-import ForeignUtils as ForeignUtils
+import Primitives as Primitives
 
 
 foreign import data XRSystem :: Type
@@ -73,7 +73,7 @@ foreign import getHandedness :: XRInputSource -> Effect (Nullable String)
 
 foreign import getHandJoints :: XRHand -> Effect (Array { name :: String, space :: XRJointSpace })
 
-foreign import getJointPosition :: XRJointPose -> Effect ForeignUtils.Float32Array
+foreign import getJointPosition :: XRJointPose -> Effect Primitives.Float32Array
 
 foreign import data XRView :: Type
 type XRViewport = 
@@ -88,9 +88,9 @@ foreign import getViews :: XRViewerPose -> Effect (Array XRView)
 foreign import getViewport :: XRWebGLLayer -> XRView -> Effect (Nullable XRViewport)
 
 
-foreign import getProjectionMatrix :: XRView -> Effect ForeignUtils.Float32Array
+foreign import getProjectionMatrix :: XRView -> Effect Primitives.Float32Array
 
-foreign import getViewMatrix :: XRView -> Effect ForeignUtils.Float32Array
+foreign import getViewMatrix :: XRView -> Effect Primitives.Float32Array
 
 foreign import data XRFramebuffer :: Type
 foreign import getFramebuffer :: XRWebGLLayer -> Effect XRFramebuffer

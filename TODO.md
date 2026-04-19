@@ -3,17 +3,21 @@
 ## Phase 1: Make the invisible visible
 No code changes. Only comments and analysis.
 
-- [ ] Comment ForeignUtils.purs by functional block
-  - [TypedArray Primitives]
-  - [Vec3 Operations]
-  - [Mat4 Operations]
-  - [Mat4 Queries]
-  - [Spatial Operations]
-- [ ] Comment ForeignUtils.js with matching blocks
+- [x] Comment ForeignUtils.purs by functional block
+  - Two layers: Primitives (TypedArray machinery) / Linear Algebra (mathematical operations)
+  - Sub-blocks: [TypedArray Types + Constructors], [TypedArray Access], [TypedArray Mutation], [TypedArray Conversion]
+  - Sub-blocks: [Vec3 Operations], [Mat4 Operations], [Mat4 Queries], [Spatial Operations]
+  - Annotated: type dishonesty (forall a), Effect inconsistency, totality issues, Phase 2 names, design choices, composition opportunities
+- [x] Comment ForeignUtils.js with matching blocks
 - [ ] Verify Main.purs section comments reflect discovered layers
-- [ ] Totality audit: find every fromMaybe, !!, incomplete pattern match in Main
-  - Classify each: programmer error vs system condition
-  - Add inline comments marking decisions
+- [x] Totality audit: find every fromMaybe, !!, incomplete pattern match in Main
+  - Classified each: programmer error vs system condition
+  - Two real issues: getVertex and rayMeshIntersect silence out-of-bounds with fromMaybe
+    - Root cause: flat Array Number can't express "this index is valid"
+    - Resolves in Phase 2 when geometry becomes Array Vec3
+  - Shader error fromMaybe: correct (system boundary, GPU driver can return null)
+  - handedness string match: correct (system boundary), but candidate for parse-don't-validate (String → Handedness ADT)
+  - All Map.lookup and InteractionMode pattern matches are total
 
 ## Phase 2: Linear algebra foundation
 Create Vec3 and Mat4 modules. ForeignUtils dissolves.
@@ -21,15 +25,43 @@ Create Vec3 and Mat4 modules. ForeignUtils dissolves.
 - [ ] Vec3.purs + Vec3.js
   - newtype Vec3 with private constructor
   - Smart constructors: vec3
-  - Operations: sub, add, dot, cross, normalize, distance, midpoint, scale
-  - Rename: sub3→sub, get3DDistance→distance, etc.
+  - Extract what exists (used in Main today):
+    - sub, add, dot, cross, normalize, midpoint, distance
+    - Rename: sub3→sub, get3DDistance→distance, normalize3→normalize, etc.
+  - Add when needed (not used yet — reference for future):
+    - zero: identity element of addition; makes normalize3's silent [0,0,0] explicit
+    - scale: scalar multiplication; unlocks lerp, spring physics, weighted averages
+      - lerp t a b = add (scale (1-t) a) (scale t b) → smooth hand tracking, animated transitions
+      - force = scale (-k) displacement → spring/snap-back interactions
+      - center of mass of N points = weighted sum via scale + add
+    - negate: reverse direction; needed for reflection, explicit direction reversal
+      - reflect v n = sub v (scale (2 * dot v n) n) → bounce, mirror effects
+    - length: magnitude; sqrt(dot v v), total (always >= 0)
+      - guard normalize: if length v > epsilon then normalize else fallback → totality solved
+      - speed = length velocity → gesture speed detection (tap vs drag)
+      - already implicitly used: sqrt(dot rotationAxis rotationAxis) on line 544
+  - Algebraic structure: add + zero + negate = abelian group; + scale = vector space; + dot = inner product space
+  - Derivation hierarchy: dot → length → distance (each derived from the one before)
+  - Totality question: normalize :: Vec3 → Maybe Vec3? Decide when extracting.
   - Compile and verify
 - [ ] Mat4.purs + Mat4.js
   - newtype Mat4 with private constructor
-  - Smart constructors: identity, translation, rotation
-  - Operations: multiply, transformPoint
-  - Queries: translationOf, scaleOf
-  - Rename: multiplyMatrix4x4→multiply, getTranslationFromMatrix→translationOf, etc.
+  - Extract what exists (used in Main today):
+    - multiply, fromTranslation, fromAxisAngle, transformPoint, translationOf, scaleOf
+    - identity — currently defined in Main as identityMatrix4x4Float32, belongs here
+    - fromScale — Main builds scale matrices manually (lines 530-535), replaces real code
+    - Rename: multiplyMatrix4x4→multiply, getTranslationFromMatrix→translationOf, etc.
+  - Add when needed (not used yet — reference for future):
+    - inverse: Mat4 → Mat4; unlocks efficient ray casting and space conversions
+      - Current rayMeshIntersect transforms every vertex to world space (3×N transforms per mesh)
+      - With inverse: transform ray to local space once (1 transform), test against local vertices
+      - For 12-triangle cube: 1 transform vs 36. For complex models: critical.
+      - Theory: covariance vs contravariance — push geometry forward or pull query backward
+      - Also needed for: camera math (view matrix = inverse of camera model matrix)
+    - fromScale3 :: Vec3 → Mat4 — non-uniform scale (stretch along one axis); uniform is enough for now
+  - Monoid structure: (Mat4, multiply, identity) — associative + identity element
+  - Constructors family: fromTranslation + fromAxisAngle + fromScale = T·R·S
+    - These don't commute: T·R·S ≠ S·R·T (non-abelian)
   - Compile and verify
 - [ ] Migrate ForeignUtils → Vec3 + Mat4
   - What remains (TypedArray primitives, copyInto, subarray) stays as TypedArray module or in ForeignUtils
@@ -38,6 +70,11 @@ Create Vec3 and Mat4 modules. ForeignUtils dissolves.
   - composeModelMatrix → interpretTransform
   - addCubeToScene → addObjectToScene (parametrize by GeometryId)
   - generateRandomTranslationMatrix4x4Float32 → randomPosition :: Effect Vec3
+  - makeTranslationMatrix dissolves — it only exists because getAt is Effect; with Vec3, just use fromTranslation
+  - get3DDistanceFromMatrix dissolves — becomes distance p (translationOf m)
+  - Manual scale matrix (lines 530-535) becomes fromScale scaleFactor
+  - sqrt(dot rotationAxis rotationAxis) becomes length rotationAxis
+  - identityMatrix4x4Float32 moves to Mat4.identity
   - All naming changes propagate
 
 ## Phase 2.5: Restructure GPU resource setup
@@ -103,6 +140,12 @@ Domain types for transforms, GPU conversion at the boundary.
   - First spawn generates SceneObjectId "1" — works by accident, not design
   - Fix: either use counter for initial cube too, or start counter at a different value
 
+## Observations from Phase 1 analysis
+
+- Effect inconsistency in ForeignUtils: getAt and get3DDistance are Effect, but sub3/dot3/toArray are pure — all read from Float32Array without mutating. Phase 2 must make a conscious choice about purity boundary at FFI.
+- float32Array/uint16Array use `forall a` but only accept Array Number — type-dishonest. Phase 2 fixes with smart constructors.
+- axisAngleRotationMatrix takes cos/sin separately, not the angle — caller does trig. Intentional or accidental? Decide in Phase 2.
+
 ## Observations from code review (to be addressed in relevant phases)
 - Shader locations could be a record type (ShaderLocations) but must not couple WorldState to WebGL2
   - Lives in RenderState, not WorldState (Phase 4)
@@ -138,7 +181,21 @@ Domain types for transforms, GPU conversion at the boundary.
 - Smart constructors and abstract types in PureScript
 - Type class laws (what laws should Vector have?)
 - Quaternions as structure
-- Parametricity and free theorems
+- Parametricity and free theorems (connects to: forall a dishonesty in FFI, Reynolds' abstraction theorem)
+- Vector spaces: abelian group (add, zero, negate) + scalar multiplication = vector space
+- Inner product spaces: dot product → norm (length) → metric (distance) — derivation hierarchy
+- Monoids and groups: (Mat4, multiply, identity) as monoid; invertible matrices as group GL(4,ℝ)
+- Referential transparency: when named primitives clarify intent vs when composition suffices
+- Totality: total functions (length: always valid) vs partial (normalize: zero vector edge case)
+
+### Composition recipes (what primitives unlock together)
+- scale + add → lerp (interpolation, animation, smooth tracking)
+- scale + dot + sub → reflect (bounce, mirror effects)
+- length + normalize → safe normalization (totality via guard)
+- inverse + transformPoint → efficient space conversion (ray casting, camera)
+- lerp + tick → animation system (smooth transitions between states)
+- scale + sub → spring force (snap-back, elastic interactions)
+- Each new primitive doesn't add one capability — it multiplies the compositions available
 
 ### Axioms (derive principles from these)
 - Honest representation: code means what it says
