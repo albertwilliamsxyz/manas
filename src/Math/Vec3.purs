@@ -1,4 +1,4 @@
-module Math
+module Math.Vec3
   ( Vec3
   , vec3
   , zero
@@ -13,6 +13,7 @@ module Math
   , normalize
   , midpoint
   , toFloat32Array
+  , fromFloat32Array
   ) where
 
 import Prelude hiding (add, sub, zero, negate)
@@ -71,3 +72,6 @@ midpoint a b = scale 0.5 (add a b)
 
 toFloat32Array :: Vec3 -> Float32Array
 toFloat32Array (Vec3 arr) = arr
+
+fromFloat32Array :: Float32Array -> Vec3
+fromFloat32Array = Vec3

@@ -20,8 +20,11 @@ import Effect.Class (liftEffect)
 import Effect.Console (log)
 import Effect.Random (random)
 import Effect.Ref as Ref
-import ForeignUtils as ForeignUtils
-import Math as Math
+import Math.Geometry as Math.Geometry
+import Math.Mat4 (Mat4)
+import Math.Mat4 as Math.Mat4
+import Math.Vec3 (Vec3)
+import Math.Vec3 as Math.Vec3
 import Primitives as Primitives
 import Web.DOM.Element as Element
 import Web.DOM.NonElementParentNode (getElementById)
@@ -125,28 +128,15 @@ cubeTriangleIndices =
     , 4, 5, 1, 4, 1, 0   -- bottom
     ]
 
--- [Mathematics]
-
-identityMatrix4x4 :: Array Number
-identityMatrix4x4 =
-  [ 1.0, 0.0, 0.0, 0.0
-  , 0.0, 1.0, 0.0, 0.0
-  , 0.0, 0.0, 1.0, 0.0
-  , 0.0, 0.0, 0.0, 1.0
-  ]
-
-identityMatrix4x4Float32 :: Primitives.Float32Array
-identityMatrix4x4Float32 = ForeignUtils.float32Array identityMatrix4x4
-
 -- [Vec3 Conversion]
 
-readVec3At :: Primitives.Float32Array -> Int -> Effect Math.Vec3
+readVec3At :: Primitives.Float32Array -> Int -> Effect Vec3
 readVec3At arr index = do
   let offset = index * 3
-  x <- ForeignUtils.getAt arr offset
-  y <- ForeignUtils.getAt arr (offset + 1)
-  z <- ForeignUtils.getAt arr (offset + 2)
-  pure (Math.vec3 x y z)
+  x <- Primitives.getAt arr offset
+  y <- Primitives.getAt arr (offset + 1)
+  z <- Primitives.getAt arr (offset + 2)
+  pure (Math.Vec3.vec3 x y z)
 
 -- [WebGL Shaders]
 
@@ -194,15 +184,10 @@ type Geometry =
     , topology :: Topology
     }
 
-type Transform = 
-    { translation :: Primitives.Float32Array
-    , rotation :: Primitives.Float32Array
-    , scale :: Primitives.Float32Array
-    }
-
-type Ray = 
-    { origin :: Primitives.Float32Array
-    , direction :: Primitives.Float32Array
+type Transform =
+    { translation :: Mat4
+    , rotation :: Mat4
+    , scale :: Mat4
     }
 
 -- [WebGL resource types]
@@ -248,27 +233,27 @@ data InteractionMode
     | OneHandManipulate
         { hand :: Handedness
         , objectId :: SceneObjectId
-        , grabOffset :: Primitives.Float32Array
+        , grabOffset :: Vec3
         }
     | TwoHandManipulate
         { objectId :: SceneObjectId
-        , initialMidpoint :: Primitives.Float32Array
+        , initialMidpoint :: Vec3
         , initialDistance :: Number
-        , initialDirection :: Primitives.Float32Array
-        , initialScale :: Primitives.Float32Array
-        , initialRotation :: Primitives.Float32Array
-        , initialTranslation :: Primitives.Float32Array
+        , initialDirection :: Vec3
+        , initialScale :: Mat4
+        , initialRotation :: Mat4
+        , initialTranslation :: Mat4
         }
 
 type HandState =
     { pinching :: Boolean
-    , position :: Primitives.Float32Array
+    , position :: Vec3
     }
 
 type InteractionResult =
     { mode :: InteractionMode
     , sceneObjects :: Map SceneObjectId SceneObject
-    , shouldSpawn :: Maybe { hand :: Handedness, position :: Primitives.Float32Array }
+    , shouldSpawn :: Maybe { hand :: Handedness, position :: Vec3 }
     }
 
 -- [Scene types]
@@ -299,50 +284,45 @@ type WorldState =
 
 -- [Mathematics]
 
-generateRandomTranslationMatrix4x4Float32 :: Effect (Primitives.Float32Array)
-generateRandomTranslationMatrix4x4Float32 = do
+generateRandomTranslation :: Effect Mat4
+generateRandomTranslation = do
     tx <- random
     ty <- random
     tz <- random
-    pure $ ForeignUtils.float32Array
-        [ 1.0, 0.0, 0.0, 0.0
-        , 0.0, 1.0, 0.0, 0.0
-        , 0.0, 0.0, 1.0, 0.0
-        , tx, ty, tz, 1.0
-        ]
+    pure $ Math.Mat4.translation (Math.Vec3.vec3 tx ty tz)
 
-getVertex :: Array Number -> Int -> Primitives.Float32Array
-getVertex vertices i = 
+getVertex :: Array Number -> Int -> Vec3
+getVertex vertices i =
     let offset = i * 3
         x = fromMaybe 0.0 (vertices !! offset)
         y = fromMaybe 0.0 (vertices !! (offset + 1))
         z = fromMaybe 0.0 (vertices !! (offset + 2))
-    in ForeignUtils.float32Array [x, y, z]
+    in Math.Vec3.vec3 x y z
 
-rayMeshIntersect 
-    :: { origin :: Primitives.Float32Array, direction :: Primitives.Float32Array } 
-    -> Primitives.Float32Array 
-    -> Geometry 
+rayMeshIntersect
+    :: { origin :: Vec3, direction :: Vec3 }
+    -> Mat4
+    -> Geometry
     -> Maybe Number
-rayMeshIntersect ray modelMatrix geometry = 
+rayMeshIntersect ray modelMatrix geometry =
     go 0 Nothing
     where
     verts = geometry.vertices
     indices = geometry.triangleIndices
     numTriangles = length indices / 3
-    
+
     go :: Int -> Maybe Number -> Maybe Number
     go i closest
         | i >= numTriangles = closest
-        | otherwise = 
+        | otherwise =
             let idx = i * 3
                 i0 = fromMaybe 0 (indices !! idx)
                 i1 = fromMaybe 0 (indices !! (idx + 1))
                 i2 = fromMaybe 0 (indices !! (idx + 2))
-                v0 = ForeignUtils.transformPoint3 modelMatrix (getVertex verts i0)
-                v1 = ForeignUtils.transformPoint3 modelMatrix (getVertex verts i1)
-                v2 = ForeignUtils.transformPoint3 modelMatrix (getVertex verts i2)
-                hit = toMaybe (ForeignUtils.rayTriangleIntersect ray v0 v1 v2)
+                v0 = Math.Mat4.transformPoint modelMatrix (getVertex verts i0)
+                v1 = Math.Mat4.transformPoint modelMatrix (getVertex verts i1)
+                v2 = Math.Mat4.transformPoint modelMatrix (getVertex verts i2)
+                hit = Math.Geometry.rayTriangleIntersect ray v0 v1 v2
             in case hit, closest of
                 Just t, Nothing -> go (i + 1) (Just t)
                 Just t, Just prev -> go (i + 1) (Just (min t prev))
@@ -356,7 +336,7 @@ topologyToDrawMode Points = WebGL2.points
 topologyToDrawMode Lines = WebGL2.lines
 topologyToDrawMode Triangles = WebGL2.triangles
 
-addCubeToScene :: Primitives.Float32Array -> WorldState -> WorldState
+addCubeToScene :: Mat4 -> WorldState -> WorldState
 addCubeToScene position worldState = worldState
     { sceneObjects = Map.insert newId newObject worldState.sceneObjects
     , nextObjectId = worldState.nextObjectId + 1
@@ -367,8 +347,8 @@ addCubeToScene position worldState = worldState
             { geometryId: GeometryId "cube"
             , transform:
                 { translation: position
-                , rotation: identityMatrix4x4Float32
-                , scale: identityMatrix4x4Float32
+                , rotation: Math.Mat4.identity
+                , scale: Math.Mat4.identity
                 }
             }
 
@@ -382,9 +362,9 @@ uploadGeometry webGL2Context positionLocation geometry = do
     indexBuffer <- except $ note "Index buffer could not be created" (toMaybe nullableIndexBuffer)
     liftEffect $ WebGL2.bindVertexArray webGL2Context vao
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer vertexBuffer
-    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (ForeignUtils.float32Array geometry.vertices) WebGL2.staticDraw
+    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (Primitives.float32Array geometry.vertices) WebGL2.staticDraw
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer indexBuffer
-    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (ForeignUtils.uint16Array geometry.edgeIndices) WebGL2.staticDraw
+    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (Primitives.uint16Array geometry.edgeIndices) WebGL2.staticDraw
     liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
     liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
     liftEffect $ WebGL2.unbindVertexArray webGL2Context
@@ -395,26 +375,14 @@ uploadGeometry webGL2Context positionLocation geometry = do
          , vertexCount: length geometry.edgeIndices
          }
 
-makeTranslationMatrix :: Primitives.Float32Array -> Effect Primitives.Float32Array
-makeTranslationMatrix position = do
-    x <- ForeignUtils.getAt position 0
-    y <- ForeignUtils.getAt position 1
-    z <- ForeignUtils.getAt position 2
-    pure $ ForeignUtils.float32Array
-        [ 1.0, 0.0, 0.0, 0.0
-        , 0.0, 1.0, 0.0, 0.0
-        , 0.0, 0.0, 1.0, 0.0
-        , x, y, z, 1.0
-        ]
+composeModelMatrix :: Transform -> Mat4
+composeModelMatrix transform =
+    Math.Mat4.multiply transform.translation
+        (Math.Mat4.multiply transform.rotation transform.scale)
 
-composeModelMatrix :: Transform -> Primitives.Float32Array
-composeModelMatrix transform = 
-    ForeignUtils.multiplyMatrix4x4 transform.translation 
-        (ForeignUtils.multiplyMatrix4x4 transform.rotation transform.scale)
-
-findHitObject 
-    :: { origin :: Primitives.Float32Array, direction :: Primitives.Float32Array }
-    -> WorldState 
+findHitObject
+    :: { origin :: Vec3, direction :: Vec3 }
+    -> WorldState
     -> Maybe SceneObjectId
 findHitObject ray worldState = 
     go (Map.toUnfoldable worldState.sceneObjects :: Array (Tuple SceneObjectId SceneObject)) Nothing
@@ -433,11 +401,11 @@ findHitObject ray worldState =
                             | t < prevT -> go rest (Just (Tuple objId t))
                         _, _ -> go rest acc
 
-findNearestObject 
-    :: Primitives.Float32Array
+findNearestObject
+    :: Vec3
     -> Map SceneObjectId SceneObject
     -> Maybe SceneObjectId
-findNearestObject pinchPoint sceneObjects = 
+findNearestObject pinchPoint sceneObjects =
     go (Map.toUnfoldable sceneObjects :: Array (Tuple SceneObjectId SceneObject)) Nothing
     where
     grabRadius = 0.15
@@ -445,13 +413,14 @@ findNearestObject pinchPoint sceneObjects =
         Nothing -> fst <$> acc
         Just { head: Tuple objId obj, tail: rest } ->
             let modelMatrix = composeModelMatrix obj.transform
-                dist = ForeignUtils.get3DDistanceFromMatrix pinchPoint modelMatrix
-                objScale = ForeignUtils.getScaleFromMatrix modelMatrix
+                objPos = Math.Mat4.translationOf modelMatrix
+                dist = Math.Vec3.distance pinchPoint objPos
+                objScale = Math.Mat4.scaleOf modelMatrix
                 adjustedRadius = grabRadius * objScale
             in if dist < adjustedRadius
                 then case acc of
                     Nothing -> go rest (Just (Tuple objId dist))
-                    Just (Tuple _ prevDist) 
+                    Just (Tuple _ prevDist)
                         | dist < prevDist -> go rest (Just (Tuple objId dist))
                         | otherwise -> go rest acc
                 else go rest acc
@@ -478,20 +447,20 @@ updateInteraction left right sceneObjects mode = case mode of
             | otherwise -> applyOneHand right.position state
     TwoHandManipulate state -> case left.pinching, right.pinching of
         false, false -> idle
-        true, false -> 
+        true, false ->
             case Map.lookup state.objectId sceneObjects of
-                Just obj -> 
-                    let objPos = ForeignUtils.getTranslationFromMatrix (composeModelMatrix obj.transform)
-                    in { mode: OneHandManipulate { hand: LeftHand, objectId: state.objectId, grabOffset: ForeignUtils.sub3 left.position objPos }
+                Just obj ->
+                    let objPos = Math.Mat4.translationOf (composeModelMatrix obj.transform)
+                    in { mode: OneHandManipulate { hand: LeftHand, objectId: state.objectId, grabOffset: Math.Vec3.sub left.position objPos }
                        , sceneObjects
                        , shouldSpawn: Nothing
                        }
                 Nothing -> idle
         false, true ->
             case Map.lookup state.objectId sceneObjects of
-                Just obj -> 
-                    let objPos = ForeignUtils.getTranslationFromMatrix (composeModelMatrix obj.transform)
-                    in { mode: OneHandManipulate { hand: RightHand, objectId: state.objectId, grabOffset: ForeignUtils.sub3 right.position objPos }
+                Just obj ->
+                    let objPos = Math.Mat4.translationOf (composeModelMatrix obj.transform)
+                    in { mode: OneHandManipulate { hand: RightHand, objectId: state.objectId, grabOffset: Math.Vec3.sub right.position objPos }
                        , sceneObjects
                        , shouldSpawn: Nothing
                        }
@@ -499,29 +468,29 @@ updateInteraction left right sceneObjects mode = case mode of
         true, true -> applyTwoHand left.position right.position state
     where
     idle = { mode: Observing, sceneObjects, shouldSpawn: Nothing }
-    tryGrab hand pos = 
+    tryGrab hand pos =
         case findNearestObject pos sceneObjects of
             Just objId -> case Map.lookup objId sceneObjects of
-                Just obj -> 
-                    let objPos = ForeignUtils.getTranslationFromMatrix (composeModelMatrix obj.transform)
-                    in { mode: OneHandManipulate { hand, objectId: objId, grabOffset: ForeignUtils.sub3 pos objPos }
+                Just obj ->
+                    let objPos = Math.Mat4.translationOf (composeModelMatrix obj.transform)
+                    in { mode: OneHandManipulate { hand, objectId: objId, grabOffset: Math.Vec3.sub pos objPos }
                        , sceneObjects
                        , shouldSpawn: Nothing
                        }
                 Nothing -> idle
             Nothing -> { mode: Observing, sceneObjects, shouldSpawn: Just { hand, position: pos } }
-    applyOneHand pos state = 
-        let newPos = ForeignUtils.sub3 pos state.grabOffset
-            newSceneObjects = Map.update (\obj -> Just obj { transform = obj.transform { translation = ForeignUtils.translationMatrix4x4 newPos } }) state.objectId sceneObjects
+    applyOneHand pos state =
+        let newPos = Math.Vec3.sub pos state.grabOffset
+            newSceneObjects = Map.update (\obj -> Just obj { transform = obj.transform { translation = Math.Mat4.translation newPos } }) state.objectId sceneObjects
         in { mode: OneHandManipulate state, sceneObjects: newSceneObjects, shouldSpawn: Nothing }
-    enterTwoHand leftPos rightPos state = 
+    enterTwoHand leftPos rightPos state =
         case Map.lookup state.objectId sceneObjects of
-            Just obj -> 
+            Just obj ->
                 { mode: TwoHandManipulate
                     { objectId: state.objectId
-                    , initialMidpoint: ForeignUtils.midpoint3 leftPos rightPos
-                    , initialDistance: ForeignUtils.get3DDistanceFromMatrix leftPos (ForeignUtils.translationMatrix4x4 rightPos)
-                    , initialDirection: ForeignUtils.normalize3 (ForeignUtils.sub3 rightPos leftPos)
+                    , initialMidpoint: Math.Vec3.midpoint leftPos rightPos
+                    , initialDistance: Math.Vec3.distance leftPos rightPos
+                    , initialDirection: fromMaybe Math.Vec3.zero (Math.Vec3.normalize (Math.Vec3.sub rightPos leftPos))
                     , initialScale: obj.transform.scale
                     , initialRotation: obj.transform.rotation
                     , initialTranslation: obj.transform.translation
@@ -531,33 +500,28 @@ updateInteraction left right sceneObjects mode = case mode of
                 }
             Nothing -> idle
     applyTwoHand leftPos rightPos state =
-        let currentMidpoint = ForeignUtils.midpoint3 leftPos rightPos
-            currentDistance = ForeignUtils.get3DDistanceFromMatrix leftPos (ForeignUtils.translationMatrix4x4 rightPos)
+        let currentMidpoint = Math.Vec3.midpoint leftPos rightPos
+            currentDistance = Math.Vec3.distance leftPos rightPos
             scaleFactor = currentDistance / state.initialDistance
 
-            initialPos = ForeignUtils.getTranslationFromMatrix state.initialTranslation
-            midpointDelta = ForeignUtils.sub3 currentMidpoint state.initialMidpoint
-            newTranslation = ForeignUtils.translationMatrix4x4 (ForeignUtils.add3 initialPos midpointDelta)
+            initialPos = Math.Mat4.translationOf state.initialTranslation
+            midpointDelta = Math.Vec3.sub currentMidpoint state.initialMidpoint
+            newTranslation = Math.Mat4.translation (Math.Vec3.add initialPos midpointDelta)
 
-            newScale = ForeignUtils.float32Array
-                [ scaleFactor, 0.0, 0.0, 0.0
-                , 0.0, scaleFactor, 0.0, 0.0
-                , 0.0, 0.0, scaleFactor, 0.0
-                , 0.0, 0.0, 0.0, 1.0
-                ]
+            newScale = Math.Mat4.scale scaleFactor
 
-            currentDirection = ForeignUtils.normalize3 (ForeignUtils.sub3 rightPos leftPos)
-            rotationAxis = ForeignUtils.cross3 state.initialDirection currentDirection
-            axisLength = ForeignUtils.dot3 rotationAxis rotationAxis
-            cosAngle = ForeignUtils.dot3 state.initialDirection currentDirection
+            currentDirection = fromMaybe Math.Vec3.zero (Math.Vec3.normalize (Math.Vec3.sub rightPos leftPos))
+            rotationAxis = Math.Vec3.cross state.initialDirection currentDirection
+            axisLength = Math.Vec3.dot rotationAxis rotationAxis
+            cosAngle = Math.Vec3.dot state.initialDirection currentDirection
             newRotation = if axisLength < 0.000001
                 then state.initialRotation
-                else ForeignUtils.multiplyMatrix4x4 
-                    (ForeignUtils.axisAngleRotationMatrix (ForeignUtils.normalize3 rotationAxis) cosAngle (Number.sqrt axisLength))
+                else Math.Mat4.multiply
+                    (Math.Mat4.axisAngleRotation (fromMaybe Math.Vec3.zero (Math.Vec3.normalize rotationAxis)) cosAngle (Number.sqrt axisLength))
                     state.initialRotation
 
-            newSceneObjects = Map.update (\obj -> Just obj 
-                { transform = obj.transform 
+            newSceneObjects = Map.update (\obj -> Just obj
+                { transform = obj.transform
                     { translation = newTranslation
                     , scale = newScale
                     , rotation = newRotation
@@ -643,19 +607,19 @@ main = launchAff_ do
 
         nullableProjectionLocation <- liftEffect $ WebGL2.getUniformLocation webGL2Context program "u_projection"
         projectionLocation <- except $ note "Unable to get the location of the projection uniform" (toMaybe nullableProjectionLocation)
-        liftEffect $ WebGL2.uniformMatrix4fv webGL2Context projectionLocation false identityMatrix4x4Float32
+        liftEffect $ WebGL2.uniformMatrix4fv webGL2Context projectionLocation false (Math.Mat4.toFloat32Array Math.Mat4.identity)
 
         nullableViewLocation <- liftEffect $ WebGL2.getUniformLocation webGL2Context program "u_view"
         viewLocation <- except $ note "Unable to get the location of the view uniform" (toMaybe nullableViewLocation)
-        liftEffect $ WebGL2.uniformMatrix4fv webGL2Context viewLocation false identityMatrix4x4Float32
+        liftEffect $ WebGL2.uniformMatrix4fv webGL2Context viewLocation false (Math.Mat4.toFloat32Array Math.Mat4.identity)
 
         nullableModelLocation <- liftEffect $ WebGL2.getUniformLocation webGL2Context program "u_model"
         modelLocation <- except $ note "Unable to get the location of the model uniform" (toMaybe nullableModelLocation)
-        liftEffect $ WebGL2.uniformMatrix4fv webGL2Context modelLocation false identityMatrix4x4Float32
+        liftEffect $ WebGL2.uniformMatrix4fv webGL2Context modelLocation false (Math.Mat4.toFloat32Array Math.Mat4.identity)
 
         nullableColorLocation <- liftEffect $ WebGL2.getUniformLocation webGL2Context program "u_color"
         colorLocation <- except $ note "Unable to get the location of the color uniform" (toMaybe nullableColorLocation)
-        liftEffect $ WebGL2.uniform4fv webGL2Context colorLocation (ForeignUtils.float32Array [0.0, 0.8, 0.0, 1.0])
+        liftEffect $ WebGL2.uniform4fv webGL2Context colorLocation (Primitives.float32Array [0.0, 0.8, 0.0, 1.0])
 
         -- [WIP: Abstracting new structure]
         -- Note: Here I want to add a new list of models, not just a cube, and then be able to select which one I want to spawn :P I know I'm going to need some text maybe or some other way to select the model (even rendering them in a palette for example), I also want to start thinking about the scene as a graph, but without losing performance, can we use lists or arrays? Are they more performant?
@@ -671,14 +635,14 @@ main = launchAff_ do
         cubeGPUHandle <- except cubeGPUHandleResult
 
         -- Note: Here we would see a change when we change the function generateRandomXYZ
-        cubePosition <- liftEffect $ generateRandomTranslationMatrix4x4Float32
+        cubePosition <- liftEffect $ generateRandomTranslation
         let cubeSceneObjectId = SceneObjectId "cube-instance-1"
             cubeSceneObject =
                 { geometryId: cubeGeometryId
                 , transform:
                     { translation: cubePosition
-                    , rotation: identityMatrix4x4Float32
-                    , scale: identityMatrix4x4Float32
+                    , rotation: Math.Mat4.identity
+                    , scale: Math.Mat4.identity
                     }
                 }
 
@@ -712,7 +676,7 @@ main = launchAff_ do
         nullableHandSkeletonJointIndicesBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
         handSkeletonJointIndicesBuffer <- except $ note "Hand skeleton joint indices buffer could not be created" (toMaybe nullableHandSkeletonJointIndicesBuffer)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
-        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (ForeignUtils.uint16Array handSkeletonByJointIndices) WebGL2.staticDraw
+        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (Primitives.uint16Array handSkeletonByJointIndices) WebGL2.staticDraw
 
         nullableLeftHandVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
         leftHandVAO <- except $ note "Left hand VAO could not be created" (toMaybe nullableLeftHandVAO)
@@ -721,7 +685,7 @@ main = launchAff_ do
         liftEffect $ WebGL2.bindVertexArray webGL2Context leftHandVAO
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer leftHandBuffer
         liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (
-            ForeignUtils.float32Array (replicate (numberOfJointsPerHand * baseNumberOfDimensions) 0.0)
+            Primitives.float32Array (replicate (numberOfJointsPerHand * baseNumberOfDimensions) 0.0)
         ) WebGL2.dynamicDraw
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
@@ -743,7 +707,7 @@ main = launchAff_ do
         liftEffect $ WebGL2.bindVertexArray webGL2Context rightHandVAO
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer rightHandBuffer
         liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (
-            ForeignUtils.float32Array (replicate (numberOfJointsPerHand * baseNumberOfDimensions) 0.0)
+            Primitives.float32Array (replicate (numberOfJointsPerHand * baseNumberOfDimensions) 0.0)
         ) WebGL2.dynamicDraw
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
@@ -783,8 +747,8 @@ main = launchAff_ do
                 referenceSpace <- liftAff $ WebXR.requestReferenceSpace xrSession "local"
 
                 -- Note: Isn't this part of the world state?
-                let leftHandVertices = ForeignUtils.float32Array (replicate (numberOfHandJointDimensions) 0.0)
-                    rightHandVertices = ForeignUtils.float32Array (replicate (numberOfHandJointDimensions) 0.0)
+                let leftHandVertices = Primitives.float32Array (replicate (numberOfHandJointDimensions) 0.0)
+                    rightHandVertices = Primitives.float32Array (replicate (numberOfHandJointDimensions) 0.0)
 
                 -- [Callback for tick updates from the XR session]
                 -- Note: Maybe we have to move this outside the runExperience function, but then, how do we know which function calls what and how is this different from the theoretical tick I'm think of that is only involved with the world state update? And what if I wanted to run this from a browser to for example see what I'm projecting as if it was a class, but for people who don't have VR? I don't want my logic to be here because I might have to declare another way to tick the experience, here also we're just capturing the input, translating it to world state, and then rendering based on the world state, and capturing gestures, etc, etc
@@ -814,7 +778,7 @@ main = launchAff_ do
                                         index <- except $ note ("Unknown joint name: " <> joint.name) (Map.lookup joint.name handJointIndicesByName)
                                         positionArray <- liftEffect $ WebXR.getJointPosition jointPose
                                         let offset = index * 3
-                                        liftEffect $ ForeignUtils.copyInto verticesReference positionArray offset
+                                        liftEffect $ Primitives.copyInto verticesReference positionArray offset
                                     case jointResult of
                                         Left err -> liftEffect $ log $ "Joint Loop Error (" <> joint.name <> "): " <> err
                                         Right _ -> pure unit
@@ -831,18 +795,18 @@ main = launchAff_ do
                             thumbTipIndex <- except $ note "No thumb-tip index" maybeThumbTipIndex
                             leftIndexFingerTipPosition <- liftEffect $ readVec3At leftHandVertices indexFingerTipIndex
                             leftThumbTipPosition <- liftEffect $ readVec3At leftHandVertices thumbTipIndex
-                            let leftThumbIndexDistance = Math.distance leftIndexFingerTipPosition leftThumbTipPosition
+                            let leftThumbIndexDistance = Math.Vec3.distance leftIndexFingerTipPosition leftThumbTipPosition
                             let leftIsPinching = leftThumbIndexDistance < pinchThreshold
 
                             rightIndexFingerTipPosition <- liftEffect $ readVec3At rightHandVertices indexFingerTipIndex
                             rightThumbTipPosition <- liftEffect $ readVec3At rightHandVertices thumbTipIndex
-                            let rightThumbIndexDistance = Math.distance rightIndexFingerTipPosition rightThumbTipPosition
+                            let rightThumbIndexDistance = Math.Vec3.distance rightIndexFingerTipPosition rightThumbTipPosition
                             let rightIsPinching = rightThumbIndexDistance < pinchThreshold
 
                             worldState <- liftEffect $ Ref.read worldStateRef
 
-                            let leftHand = { pinching: leftIsPinching, position: Math.toFloat32Array leftIndexFingerTipPosition }
-                            let rightHand = { pinching: rightIsPinching, position: Math.toFloat32Array rightIndexFingerTipPosition }
+                            let leftHand = { pinching: leftIsPinching, position: leftIndexFingerTipPosition }
+                            let rightHand = { pinching: rightIsPinching, position: rightIndexFingerTipPosition }
                             let interactionResult = updateInteraction leftHand rightHand worldState.sceneObjects worldState.interaction
 
                             liftEffect $ Ref.modify_ (\ws -> ws 
@@ -852,7 +816,7 @@ main = launchAff_ do
 
                             case interactionResult.shouldSpawn of
                                 Just spawn -> do
-                                    translationMatrix <- liftEffect $ makeTranslationMatrix spawn.position
+                                    let translationMatrix = Math.Mat4.translation spawn.position
                                     liftEffect $ Ref.modify_ (addCubeToScene translationMatrix) worldStateRef
                                 Nothing -> pure unit
 
@@ -878,7 +842,7 @@ main = launchAff_ do
                                   viewMatrix <- liftEffect $ WebXR.getViewMatrix view
                                   liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context projectionLocation false projectionMatrix
                                   liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context viewLocation false viewMatrix
-                                  liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false identityMatrix4x4Float32
+                                  liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false (Math.Mat4.toFloat32Array Math.Mat4.identity)
 
                                   -- [Rendering]
                                   liftEffect $ WebGL2.bindVertexArray xrWebGL2Context leftHandVAO
@@ -898,7 +862,7 @@ main = launchAff_ do
                                       case Map.lookup obj.geometryId updatedWorldState.gpuHandles of
                                           Nothing -> pure unit
                                           Just gpu -> do
-                                              liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false (composeModelMatrix obj.transform)
+                                              liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false (Math.Mat4.toFloat32Array (composeModelMatrix obj.transform))
                                               liftEffect $ WebGL2.bindVertexArray xrWebGL2Context gpu.vao
                                               liftEffect $ WebGL2.drawElements xrWebGL2Context gpu.drawMode gpu.vertexCount WebGL2.unsignedShort 0 
                         case result of
