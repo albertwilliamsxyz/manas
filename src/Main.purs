@@ -10,7 +10,7 @@ import Data.Int.Bits ((.|.))
 import Data.Map (Map, fromFoldable)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
-import Data.Nullable (toMaybe)
+import Data.Nullable (toMaybe, notNull, null)
 import Data.Number as Number
 import Data.Tuple (Tuple(..), fst)
 import Effect (Effect)
@@ -20,6 +20,7 @@ import Effect.Class (liftEffect)
 import Effect.Console (log)
 import Effect.Random (random)
 import Effect.Ref as Ref
+import Unsafe.Coerce (unsafeCoerce)
 import Math.Geometry as Math.Geometry
 import Math.Mat4 (Mat4)
 import Math.Mat4 as Math.Mat4
@@ -360,14 +361,14 @@ uploadGeometry webGL2Context positionLocation geometry = do
     vertexBuffer <- except $ note "Vertex buffer could not be created" (toMaybe nullableVertexBuffer)
     nullableIndexBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
     indexBuffer <- except $ note "Index buffer could not be created" (toMaybe nullableIndexBuffer)
-    liftEffect $ WebGL2.bindVertexArray webGL2Context vao
+    liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull vao)
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer vertexBuffer
-    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (Primitives.float32Array geometry.vertices) WebGL2.staticDraw
+    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (Primitives.f32AsArrayBufferView (Primitives.float32Array geometry.vertices)) WebGL2.staticDraw
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer indexBuffer
-    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (Primitives.uint16Array geometry.edgeIndices) WebGL2.staticDraw
+    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (Primitives.u16AsArrayBufferView (Primitives.uint16Array geometry.edgeIndices)) WebGL2.staticDraw
     liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
     liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
-    liftEffect $ WebGL2.unbindVertexArray webGL2Context
+    liftEffect $ WebGL2.bindVertexArray webGL2Context null
     pure { vao
          , vertexBuffer
          , indexBuffer
@@ -546,7 +547,7 @@ main = launchAff_ do
         applicationCanvasAsElement <- except $ note "applicationCanvas could not be converted to HTMLCanvasElement" (HTMLCanvasElement.fromElement applicationCanvas)
 
         -- [Setting up WebGL2 context and resources]
-        nullableWebGL2Context <- liftEffect $ WebGL2.createContext applicationCanvasAsElement
+        nullableWebGL2Context <- liftEffect $ WebGL2.getContext applicationCanvasAsElement
         webGL2Context <- except $ note "WebGL2 not supported" (toMaybe nullableWebGL2Context)
 
         -- Question: I want to analyze the totality of this piece of code, and extract it into its own function, I was thinking about 1) creating a function that abstracts what is common between this and the next piece, and 2) creating its own function to just clean up this function a little more. See which layers are involved, the validations, etc
@@ -554,7 +555,8 @@ main = launchAff_ do
         vertexShader <- except $ note "Vertex shader could not be created" (toMaybe nullableVertexShader)
         liftEffect $ WebGL2.shaderSource webGL2Context vertexShader vertexShaderSourceCode
         liftEffect $ WebGL2.compileShader webGL2Context vertexShader
-        vertexShaderCompiledSuccessfully <- liftEffect $ WebGL2.getShaderParameter webGL2Context vertexShader WebGL2.compileStatus
+        vertexShaderCompileStatus <- liftEffect $ WebGL2.getShaderParameter webGL2Context vertexShader WebGL2.compileStatus
+        let vertexShaderCompiledSuccessfully = unsafeCoerce vertexShaderCompileStatus :: Boolean
         _ <- if not vertexShaderCompiledSuccessfully
             then do
                 nullableErrorMessage <- liftEffect $ WebGL2.getShaderInfoLog webGL2Context vertexShader
@@ -568,7 +570,8 @@ main = launchAff_ do
         fragmentShader <- except $ note "Fragment shader could not be created" (toMaybe nullableFragmentShader)
         liftEffect $ WebGL2.shaderSource webGL2Context fragmentShader fragmentShaderSourceCode
         liftEffect $ WebGL2.compileShader webGL2Context fragmentShader
-        fragmentShaderCompiledSuccessfully <- liftEffect $ WebGL2.getShaderParameter webGL2Context fragmentShader WebGL2.compileStatus
+        fragmentShaderCompileStatus <- liftEffect $ WebGL2.getShaderParameter webGL2Context fragmentShader WebGL2.compileStatus
+        let fragmentShaderCompiledSuccessfully = unsafeCoerce fragmentShaderCompileStatus :: Boolean
         _ <- if not fragmentShaderCompiledSuccessfully
             then do
                 nullableErrorMessage <- liftEffect $ WebGL2.getShaderInfoLog webGL2Context fragmentShader
@@ -583,7 +586,8 @@ main = launchAff_ do
         liftEffect $ WebGL2.attachShader webGL2Context program vertexShader
         liftEffect $ WebGL2.attachShader webGL2Context program fragmentShader
         liftEffect $ WebGL2.linkProgram webGL2Context program
-        programCompiledSuccessfully <- liftEffect $ WebGL2.getProgramParameter webGL2Context program WebGL2.linkStatus
+        programLinkStatus <- liftEffect $ WebGL2.getProgramParameter webGL2Context program WebGL2.linkStatus
+        let programCompiledSuccessfully = unsafeCoerce programLinkStatus :: Boolean
         _ <- if not programCompiledSuccessfully
             then do
                 nullableErrorMessage <- liftEffect $ WebGL2.getProgramInfoLog webGL2Context program
@@ -676,51 +680,51 @@ main = launchAff_ do
         nullableHandSkeletonJointIndicesBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
         handSkeletonJointIndicesBuffer <- except $ note "Hand skeleton joint indices buffer could not be created" (toMaybe nullableHandSkeletonJointIndicesBuffer)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
-        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (Primitives.uint16Array handSkeletonByJointIndices) WebGL2.staticDraw
+        liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (Primitives.u16AsArrayBufferView (Primitives.uint16Array handSkeletonByJointIndices)) WebGL2.staticDraw
 
         nullableLeftHandVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
         leftHandVAO <- except $ note "Left hand VAO could not be created" (toMaybe nullableLeftHandVAO)
         nullableLeftHandBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
         leftHandBuffer <- except $ note "Left hand buffer could not be created" (toMaybe nullableLeftHandBuffer)
-        liftEffect $ WebGL2.bindVertexArray webGL2Context leftHandVAO
+        liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull leftHandVAO)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer leftHandBuffer
         liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (
-            Primitives.float32Array (replicate (numberOfJointsPerHand * baseNumberOfDimensions) 0.0)
+            Primitives.f32AsArrayBufferView (Primitives.float32Array (replicate (numberOfJointsPerHand * baseNumberOfDimensions) 0.0))
         ) WebGL2.dynamicDraw
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
-        liftEffect $ WebGL2.unbindVertexArray webGL2Context
+        liftEffect $ WebGL2.bindVertexArray webGL2Context null
 
         nullableLeftHandSkeletonVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
         leftHandSkeletonVAO <- except $ note "Left hand skeleton VAO could not be created" (toMaybe nullableLeftHandSkeletonVAO)
-        liftEffect $ WebGL2.bindVertexArray webGL2Context leftHandSkeletonVAO
+        liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull leftHandSkeletonVAO)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer leftHandBuffer
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
-        liftEffect $ WebGL2.unbindVertexArray webGL2Context
+        liftEffect $ WebGL2.bindVertexArray webGL2Context null
 
         nullableRightHandVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
         rightHandVAO <- except $ note "Right hand VAO could not be created" (toMaybe nullableRightHandVAO)
         nullableRightHandBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
         rightHandBuffer <- except $ note "Right hand buffer could not be created" (toMaybe nullableRightHandBuffer)
-        liftEffect $ WebGL2.bindVertexArray webGL2Context rightHandVAO
+        liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull rightHandVAO)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer rightHandBuffer
         liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (
-            Primitives.float32Array (replicate (numberOfJointsPerHand * baseNumberOfDimensions) 0.0)
+            Primitives.f32AsArrayBufferView (Primitives.float32Array (replicate (numberOfJointsPerHand * baseNumberOfDimensions) 0.0))
         ) WebGL2.dynamicDraw
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
-        liftEffect $ WebGL2.unbindVertexArray webGL2Context
+        liftEffect $ WebGL2.bindVertexArray webGL2Context null
 
         nullableRightHandSkeletonVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
         rightHandSkeletonVAO <- except $ note "Right hand skeleton VAO could not be created" (toMaybe nullableRightHandSkeletonVAO)
-        liftEffect $ WebGL2.bindVertexArray webGL2Context rightHandSkeletonVAO
+        liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull rightHandSkeletonVAO)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer rightHandBuffer
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
-        liftEffect $ WebGL2.unbindVertexArray webGL2Context
+        liftEffect $ WebGL2.bindVertexArray webGL2Context null
 
         -- Note: To this point, I think all is just setup, and at the end we have is... a world state? And some resources ready to be used in the experience, but the experience is not running yet, we need to start the XR session and then we can start rendering and updating the world state based on the inputs and interactions
         -- [Starting the experience on button click and running the main loop]
@@ -784,9 +788,9 @@ main = launchAff_ do
                                         Right _ -> pure unit
 
                             liftEffect $ WebGL2.bindBuffer xrWebGL2Context WebGL2.arrayBuffer leftHandBuffer
-                            liftEffect $ WebGL2.bufferSubData xrWebGL2Context WebGL2.arrayBuffer 0 leftHandVertices
+                            liftEffect $ WebGL2.bufferSubData xrWebGL2Context WebGL2.arrayBuffer 0 (Primitives.f32AsArrayBufferView leftHandVertices)
                             liftEffect $ WebGL2.bindBuffer xrWebGL2Context WebGL2.arrayBuffer rightHandBuffer
-                            liftEffect $ WebGL2.bufferSubData xrWebGL2Context WebGL2.arrayBuffer 0 rightHandVertices
+                            liftEffect $ WebGL2.bufferSubData xrWebGL2Context WebGL2.arrayBuffer 0 (Primitives.f32AsArrayBufferView rightHandVertices)
 
                             -- [Managing gestures]
                             let maybeIndexFingerTipIndex = Map.lookup "index-finger-tip" handJointIndicesByName
@@ -822,7 +826,7 @@ main = launchAff_ do
 
                             -- [Managing rendering]
                             framebuffer <- liftEffect $ WebXR.getFramebuffer xrGLLayer
-                            liftEffect $ WebGL2.bindFramebuffer xrWebGL2Context WebGL2.framebuffer framebuffer
+                            liftEffect $ WebGL2.bindFramebuffer xrWebGL2Context WebGL2.framebuffer (notNull framebuffer)
                             liftEffect $ WebGL2.clearColor xrWebGL2Context 0.0 0.0 0.0 1.0
                             liftEffect $ WebGL2.clear xrWebGL2Context (WebGL2.colorBufferBit .|. WebGL2.depthBufferBit)
 
@@ -845,16 +849,16 @@ main = launchAff_ do
                                   liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false (Math.Mat4.toFloat32Array Math.Mat4.identity)
 
                                   -- [Rendering]
-                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context leftHandVAO
+                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull leftHandVAO)
                                   liftEffect $ WebGL2.drawArrays xrWebGL2Context WebGL2.points 0 numberOfJointsPerHand
 
-                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context leftHandSkeletonVAO
+                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull leftHandSkeletonVAO)
                                   liftEffect $ WebGL2.drawElements xrWebGL2Context WebGL2.lines (length handSkeletonByJointIndices) WebGL2.unsignedShort 0
 
-                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context rightHandVAO
+                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull rightHandVAO)
                                   liftEffect $ WebGL2.drawArrays xrWebGL2Context WebGL2.points 0 numberOfJointsPerHand
 
-                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context rightHandSkeletonVAO
+                                  liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull rightHandSkeletonVAO)
                                   liftEffect $ WebGL2.drawElements xrWebGL2Context WebGL2.lines (length handSkeletonByJointIndices) WebGL2.unsignedShort 0
 
                                   updatedWorldState <- liftEffect $ Ref.read worldStateRef
@@ -863,7 +867,7 @@ main = launchAff_ do
                                           Nothing -> pure unit
                                           Just gpu -> do
                                               liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false (Math.Mat4.toFloat32Array (composeModelMatrix obj.transform))
-                                              liftEffect $ WebGL2.bindVertexArray xrWebGL2Context gpu.vao
+                                              liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull gpu.vao)
                                               liftEffect $ WebGL2.drawElements xrWebGL2Context gpu.drawMode gpu.vertexCount WebGL2.unsignedShort 0 
                         case result of
                             Left err -> log err

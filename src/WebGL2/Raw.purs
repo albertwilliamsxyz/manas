@@ -4,17 +4,17 @@ import Prelude
 
 import Data.Nullable (Nullable)
 import Effect (Effect)
+import Primitives (ArrayBufferView, Float32Array)
 import Web.HTML.HTMLCanvasElement (HTMLCanvasElement)
 
 
 foreign import data RenderingContext :: Type
-foreign import createContext
+foreign import getContext
     :: HTMLCanvasElement -> Effect (Nullable RenderingContext)
 
-type ShaderType = Int
-vertexShader :: ShaderType
+vertexShader :: Int
 vertexShader = 0x8B31
-fragmentShader :: ShaderType 
+fragmentShader :: Int
 fragmentShader = 0x8B30
 
 compileStatus :: Int
@@ -24,10 +24,10 @@ linkStatus = 0x8B82
 
 
 foreign import data Shader :: Type
-type ShaderParameter = Boolean
+foreign import data ShaderParameter :: Type
 
 foreign import createShader
-    :: RenderingContext -> ShaderType -> Effect (Nullable Shader)
+    :: RenderingContext -> Int -> Effect (Nullable Shader)
 foreign import shaderSource
     :: RenderingContext -> Shader -> String -> Effect Unit
 foreign import compileShader
@@ -41,7 +41,7 @@ foreign import deleteShader
 
 
 foreign import data Program :: Type
-type ProgramParameter = Boolean
+foreign import data ProgramParameter :: Type
 
 foreign import createProgram
     :: RenderingContext -> Effect (Nullable Program)
@@ -59,10 +59,8 @@ foreign import deleteProgram
     :: RenderingContext -> Program -> Effect Unit
 
 
-type AttributeLocation = Int
-
 foreign import getAttribLocation
-    :: RenderingContext -> Program -> String -> Effect AttributeLocation
+    :: RenderingContext -> Program -> String -> Effect Int
 
 
 foreign import data UniformLocation :: Type
@@ -70,9 +68,9 @@ foreign import data UniformLocation :: Type
 foreign import getUniformLocation
     :: RenderingContext -> Program -> String -> Effect (Nullable UniformLocation)
 foreign import uniformMatrix4fv
-    :: RenderingContext -> UniformLocation -> Boolean -> forall a. a -> Effect Unit
+    :: RenderingContext -> UniformLocation -> Boolean -> Float32Array -> Effect Unit
 foreign import uniform4fv
-    :: RenderingContext -> UniformLocation -> forall a. a -> Effect Unit
+    :: RenderingContext -> UniformLocation -> Float32Array -> Effect Unit
 
 
 foreign import data VertexArrayObject :: Type
@@ -80,17 +78,14 @@ foreign import data VertexArrayObject :: Type
 foreign import createVertexArray
     :: RenderingContext -> Effect (Nullable VertexArrayObject)
 foreign import bindVertexArray
-    :: RenderingContext -> VertexArrayObject -> Effect Unit
-foreign import unbindVertexArray
-    :: RenderingContext -> Effect Unit
+    :: RenderingContext -> Nullable VertexArrayObject -> Effect Unit
 
 
 foreign import data Buffer :: Type
 
-type BufferType = Int
-arrayBuffer :: BufferType
+arrayBuffer :: Int
 arrayBuffer = 0x8892
-elementArrayBuffer :: BufferType
+elementArrayBuffer :: Int
 elementArrayBuffer = 0x8893
 
 foreign import createBuffer
@@ -98,19 +93,18 @@ foreign import createBuffer
 foreign import bindBuffer
     :: RenderingContext -> Int -> Buffer -> Effect Unit
 foreign import bufferData
-    :: RenderingContext -> Int -> forall a. a -> Int -> Effect Unit
+    :: RenderingContext -> Int -> ArrayBufferView -> Int -> Effect Unit
 foreign import bufferSubData
-    :: RenderingContext -> Int -> Int -> forall a. a -> Effect Unit
+    :: RenderingContext -> Int -> Int -> ArrayBufferView -> Effect Unit
 foreign import vertexAttribPointer
     :: RenderingContext -> Int -> Int -> Int -> Boolean -> Int -> Int -> Effect Unit
 foreign import enableVertexAttribArray
     :: RenderingContext -> Int -> Effect Unit
 
 
-type DrawUsage = Int
-staticDraw :: DrawUsage
+staticDraw :: Int
 staticDraw = 0x88E4
-dynamicDraw :: DrawUsage
+dynamicDraw :: Int
 dynamicDraw = 0x88E8
 
 float :: Int
@@ -121,7 +115,9 @@ depthTest = 0x0B71
 
 foreign import enable :: RenderingContext -> Int -> Effect Unit
 
-foreign import bindFramebuffer :: RenderingContext -> Int -> forall a. a -> Effect Unit
+foreign import data Framebuffer :: Type
+
+foreign import bindFramebuffer :: RenderingContext -> Int -> Nullable Framebuffer -> Effect Unit
 
 foreign import clearColor :: RenderingContext -> Number -> Number -> Number -> Number -> Effect Unit
 foreign import clear :: RenderingContext -> Int -> Effect Unit
