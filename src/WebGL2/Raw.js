@@ -1,4 +1,4 @@
-export const createContext = (canvas) => () => canvas.getContext('webgl2');
+export const getContext = (canvas) => () => canvas.getContext('webgl2');
 
 export const createShader = (gl) => (type) => () => gl.createShader(type);
 export const shaderSource = (gl) => (shader) => (source) => () => gl.shaderSource(shader, source);
@@ -23,7 +23,6 @@ export const uniform4fv = (gl) => (location) => (value) => () => gl.uniform4fv(l
 
 export const createVertexArray = (gl) => () => gl.createVertexArray();
 export const bindVertexArray = (gl) => (vao) => () => gl.bindVertexArray(vao);
-export const unbindVertexArray = (gl) => () => gl.bindVertexArray(null);
 export const createBuffer = (gl) => () => gl.createBuffer();
 export const bindBuffer = (gl) => (target) => (buffer) => () => gl.bindBuffer(target, buffer);
 export const bufferData = (gl) => (target) => (data) => (usage) => () => gl.bufferData(target, data, usage);

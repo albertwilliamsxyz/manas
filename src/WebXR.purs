@@ -8,7 +8,7 @@ import Effect (Effect)
 import Effect.Aff (Aff)
 import Web.HTML (Navigator)
 import Web.HTML.Window (Window)
-import WebGL2 (RenderingContext)
+import WebGL2.Raw (RenderingContext, Framebuffer)
 import Primitives as Primitives
 
 
@@ -92,6 +92,5 @@ foreign import getProjectionMatrix :: XRView -> Effect Primitives.Float32Array
 
 foreign import getViewMatrix :: XRView -> Effect Primitives.Float32Array
 
-foreign import data XRFramebuffer :: Type
-foreign import getFramebuffer :: XRWebGLLayer -> Effect XRFramebuffer
+foreign import getFramebuffer :: XRWebGLLayer -> Effect Framebuffer
 
