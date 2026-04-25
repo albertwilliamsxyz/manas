@@ -36,7 +36,7 @@ import Web.HTML.HTMLCanvasElement as HTMLCanvasElement
 import Web.HTML.HTMLDocument as HTMLDocument
 import Web.HTML.HTMLElement as HTMLElement
 import Web.HTML.Window (document, navigator)
-import WebGL2 as WebGL2
+import WebGL2.Raw as WebGL2
 import WebXR as WebXR
 
 

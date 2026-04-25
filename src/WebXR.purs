@@ -8,7 +8,7 @@ import Effect (Effect)
 import Effect.Aff (Aff)
 import Web.HTML (Navigator)
 import Web.HTML.Window (Window)
-import WebGL2 (RenderingContext)
+import WebGL2.Raw (RenderingContext)
 import Primitives as Primitives
 
 

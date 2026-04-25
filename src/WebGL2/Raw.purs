@@ -1,4 +1,4 @@
-module WebGL2 where
+module WebGL2.Raw where
 
 import Prelude
 
