@@ -37,6 +37,7 @@ import Web.HTML.HTMLCanvasElement as HTMLCanvasElement
 import Web.HTML.HTMLDocument as HTMLDocument
 import Web.HTML.HTMLElement as HTMLElement
 import Web.HTML.Window (document, navigator)
+import WebGL2 (ShaderType(..), makeShader)
 import WebGL2.Raw as WebGL2
 import WebXR as WebXR
 
@@ -551,34 +552,10 @@ main = launchAff_ do
         webGL2Context <- except $ note "WebGL2 not supported" (toMaybe nullableWebGL2Context)
 
         -- Question: I want to analyze the totality of this piece of code, and extract it into its own function, I was thinking about 1) creating a function that abstracts what is common between this and the next piece, and 2) creating its own function to just clean up this function a little more. See which layers are involved, the validations, etc
-        nullableVertexShader <- liftEffect $ WebGL2.createShader webGL2Context WebGL2.vertexShader        
-        vertexShader <- except $ note "Vertex shader could not be created" (toMaybe nullableVertexShader)
-        liftEffect $ WebGL2.shaderSource webGL2Context vertexShader vertexShaderSourceCode
-        liftEffect $ WebGL2.compileShader webGL2Context vertexShader
-        vertexShaderCompileStatus <- liftEffect $ WebGL2.getShaderParameter webGL2Context vertexShader WebGL2.compileStatus
-        let vertexShaderCompiledSuccessfully = unsafeCoerce vertexShaderCompileStatus :: Boolean
-        _ <- if not vertexShaderCompiledSuccessfully
-            then do
-                nullableErrorMessage <- liftEffect $ WebGL2.getShaderInfoLog webGL2Context vertexShader
-                liftEffect $ WebGL2.deleteShader webGL2Context vertexShader
-                except $ Left $ fromMaybe "Unknown Error when compiling vertex shader" (toMaybe nullableErrorMessage)
-            else do
-                except $ Right "Vertex shader compiled successfully"
+        vertexShader <- makeShader webGL2Context VertexShader vertexShaderSourceCode
 
         -- Question: I want to analyze the totality of this piece of code, and extract it into its own function, see prev question
-        nullableFragmentShader <- liftEffect $ WebGL2.createShader webGL2Context WebGL2.fragmentShader
-        fragmentShader <- except $ note "Fragment shader could not be created" (toMaybe nullableFragmentShader)
-        liftEffect $ WebGL2.shaderSource webGL2Context fragmentShader fragmentShaderSourceCode
-        liftEffect $ WebGL2.compileShader webGL2Context fragmentShader
-        fragmentShaderCompileStatus <- liftEffect $ WebGL2.getShaderParameter webGL2Context fragmentShader WebGL2.compileStatus
-        let fragmentShaderCompiledSuccessfully = unsafeCoerce fragmentShaderCompileStatus :: Boolean
-        _ <- if not fragmentShaderCompiledSuccessfully
-            then do
-                nullableErrorMessage <- liftEffect $ WebGL2.getShaderInfoLog webGL2Context fragmentShader
-                liftEffect $ WebGL2.deleteShader webGL2Context fragmentShader
-                except $ Left $ fromMaybe "Unknown Error when compiling fragment shader" (toMaybe nullableErrorMessage)
-            else do
-                except $ Right "Fragment shader compiled successfully"
+        fragmentShader <- makeShader webGL2Context FragmentShader fragmentShaderSourceCode
 
         -- Question: I'm this can be extracted too
         nullableProgram <- liftEffect $ WebGL2.createProgram webGL2Context
