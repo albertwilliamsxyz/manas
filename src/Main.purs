@@ -36,7 +36,7 @@ import Web.HTML.HTMLCanvasElement as HTMLCanvasElement
 import Web.HTML.HTMLDocument as HTMLDocument
 import Web.HTML.HTMLElement as HTMLElement
 import Web.HTML.Window (document, navigator)
-import WebGL2 (ShaderType(..), makeShader, makeProgram, makeBuffer, makeVertexArrayObject)
+import WebGL2 (ShaderType(..), makeShader, makeProgram, makeBuffer, makeVertexArrayObject, findUniformLocation)
 import WebGL2.Raw as WebGL2
 import WebXR as WebXR
 
@@ -566,20 +566,16 @@ main = launchAff_ do
             then except $ Left "Unable to get the location of the position attribute"
             else except $ Right "Position attribute location obtained successfully"
 
-        nullableProjectionLocation <- liftEffect $ WebGL2.getUniformLocation webGL2Context program "u_projection"
-        projectionLocation <- except $ note "Unable to get the location of the projection uniform" (toMaybe nullableProjectionLocation)
+        projectionLocation <- findUniformLocation webGL2Context program "u_projection"
         liftEffect $ WebGL2.uniformMatrix4fv webGL2Context projectionLocation false (Math.Mat4.toFloat32Array Math.Mat4.identity)
 
-        nullableViewLocation <- liftEffect $ WebGL2.getUniformLocation webGL2Context program "u_view"
-        viewLocation <- except $ note "Unable to get the location of the view uniform" (toMaybe nullableViewLocation)
+        viewLocation <- findUniformLocation webGL2Context program "u_view"
         liftEffect $ WebGL2.uniformMatrix4fv webGL2Context viewLocation false (Math.Mat4.toFloat32Array Math.Mat4.identity)
 
-        nullableModelLocation <- liftEffect $ WebGL2.getUniformLocation webGL2Context program "u_model"
-        modelLocation <- except $ note "Unable to get the location of the model uniform" (toMaybe nullableModelLocation)
+        modelLocation <- findUniformLocation webGL2Context program "u_model"
         liftEffect $ WebGL2.uniformMatrix4fv webGL2Context modelLocation false (Math.Mat4.toFloat32Array Math.Mat4.identity)
 
-        nullableColorLocation <- liftEffect $ WebGL2.getUniformLocation webGL2Context program "u_color"
-        colorLocation <- except $ note "Unable to get the location of the color uniform" (toMaybe nullableColorLocation)
+        colorLocation <- findUniformLocation webGL2Context program "u_color"
         liftEffect $ WebGL2.uniform4fv webGL2Context colorLocation (Primitives.float32Array [0.0, 0.8, 0.0, 1.0])
 
         -- [WIP: Abstracting new structure]

@@ -4,6 +4,7 @@ module WebGL2
   , makeProgram
   , makeBuffer
   , makeVertexArrayObject
+  , findUniformLocation
   ) where
 
 import Prelude
@@ -82,3 +83,14 @@ makeVertexArrayObject
 makeVertexArrayObject gl = do
   nullableVertexArrayObject <- liftEffect $ Raw.createVertexArray gl
   except $ note "Vertex array object could not be created" (toMaybe nullableVertexArrayObject)
+
+
+findUniformLocation
+  :: forall m. MonadEffect m
+  => Raw.RenderingContext
+  -> Raw.Program
+  -> String
+  -> ExceptT String m Raw.UniformLocation
+findUniformLocation gl program name = do
+  nullableLocation <- liftEffect $ Raw.getUniformLocation gl program name
+  except $ note ("Uniform location not found: " <> name) (toMaybe nullableLocation)
