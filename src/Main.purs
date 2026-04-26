@@ -38,7 +38,8 @@ import Web.HTML.HTMLElement as HTMLElement
 import Web.HTML.Window (document, navigator)
 import WebGL2 (ShaderType(..), makeShader, makeProgram, makeBuffer, makeVertexArrayObject, findUniformLocation)
 import WebGL2.Raw as WebGL2
-import WebXR as WebXR
+import WebXR (makeXRWebGL2Compatible, isWebXRSessionModeSupported, requestSession, requestReferenceSpace)
+import WebXR.Raw as WebXR
 
 
 -- [Constants]
@@ -682,19 +683,19 @@ main = launchAff_ do
                 xrSystem <- except $ note "WebXR not supported" (toMaybe nullableXRSystem)
 
                 -- Note: Can we just extract run experience into its own experience? I think it might receive a WorldState and then returning the runExperience function itself, but I don't want to do this directly, I think the wisest way to approach it is to list all the references from outside this scope, and encapsulate them within the world state.
-                isWebXRSessionModeSupported <- liftAff $ WebXR.isWebXRSessionModeSupported xrSystem "immersive-ar"
+                isWebXRSessionModeSupported <- liftAff $ isWebXRSessionModeSupported xrSystem "immersive-ar"
                 _ <- if not isWebXRSessionModeSupported
                     then except $ Left "WebXR session mode not supported"
                     else except $ Right "WebXR session mode supported"
-                liftAff $ WebXR.makeXRWebGL2Compatible xrWebGL2Context
+                liftAff $ makeXRWebGL2Compatible xrWebGL2Context
 
                 -- Note: I want my types to be honest here I've been declaring a lot of things explicitly as I use them but I want to explore with other types of experiences
-                xrSession <- liftAff $ WebXR.requestSession xrSystem "immersive-ar" { requiredFeatures: ["hand-tracking"] }
+                xrSession <- liftAff $ requestSession xrSystem "immersive-ar" { requiredFeatures: ["hand-tracking"] }
                 xrGLLayer <- liftEffect $ WebXR.createXRWebGLLayer xrWin xrSession xrWebGL2Context
                 liftEffect $ WebXR.updateRenderState xrSession { baseLayer: xrGLLayer }
 
                 -- Note: I would like to move within a boundary, right now I can only use the app in a single position.
-                referenceSpace <- liftAff $ WebXR.requestReferenceSpace xrSession "local"
+                referenceSpace <- liftAff $ requestReferenceSpace xrSession "local"
 
                 -- Note: Isn't this part of the world state?
                 let leftHandVertices = Primitives.float32Array (replicate (numberOfHandJointDimensions) 0.0)

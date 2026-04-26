@@ -1,15 +1,15 @@
-export const makeXRWebGL2CompatibleImpl = (gl) => () => gl.makeXRCompatible();
+export const makeXRWebGL2Compatible = (gl) => () => gl.makeXRCompatible();
 
 export const getXRSystem = (navigator) => () => navigator.xr == null ? null : navigator.xr;
-export const isWebXRSessionModeSupportedImpl = (xr) => (mode) => () => xr.isSessionSupported(mode);
+export const isWebXRSessionModeSupported = (xr) => (mode) => () => xr.isSessionSupported(mode);
 
-export const requestSessionImpl = (xr) => (mode) => (opts) => () => xr.requestSession(mode, opts);
+export const requestSession = (xr) => (mode) => (opts) => () => xr.requestSession(mode, opts);
 
 export const createXRWebGLLayer = (window) => (xrSession) => (gl) => () => new window.XRWebGLLayer(xrSession, gl);
 
 export const updateRenderState = (xrSession) => (options) => () => xrSession.updateRenderState(options);
 
-export const requestReferenceSpaceImpl = (xrSession) => (type) => () => xrSession.requestReferenceSpace(type);
+export const requestReferenceSpace = (xrSession) => (type) => () => xrSession.requestReferenceSpace(type);
 
 export const requestAnimationFrame = (session) => (callback) => () =>
   session.requestAnimationFrame((time, frame) => {
@@ -45,6 +45,4 @@ export const getProjectionMatrix = (view) => () => new Float32Array(view.project
 
 export const getViewMatrix = (view) => () => new Float32Array(view.transform.inverse.matrix);
 
-
 export const getFramebuffer = (layer) => () => layer.framebuffer;
-
