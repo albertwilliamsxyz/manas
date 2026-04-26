@@ -16,7 +16,7 @@ import Data.Tuple (Tuple(..), fst)
 import Effect (Effect)
 import Effect.Aff (Aff, launchAff_)
 import Effect.Aff.Class (liftAff)
-import Effect.Class (liftEffect)
+import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
 import Effect.Random (random)
 import Effect.Ref as Ref
@@ -354,7 +354,7 @@ addCubeToScene position worldState = worldState
                 }
             }
 
-uploadGeometry :: WebGL2.RenderingContext -> Int -> Geometry -> ExceptT String Effect GPUHandle
+uploadGeometry :: forall m. MonadEffect m => WebGL2.RenderingContext -> Int -> Geometry -> ExceptT String m GPUHandle
 uploadGeometry webGL2Context positionLocation geometry = do
     vao <- makeVertexArrayObject webGL2Context
     vertexBuffer <- makeBuffer webGL2Context
@@ -534,12 +534,10 @@ main :: Effect Unit
 main = launchAff_ do
     result <- runExceptT do
         -- [Getting HTML resources]
-        -- Note: Here we're interfacing with the DOM to get the canvas element and set up WebGL2.
         win <- liftEffect window
         doc <- liftEffect $ document win
         nav <- liftEffect $ navigator win
 
-        -- Note: Here we're reading the applicationCanvas
         maybeApplicationCanvas <- liftEffect $ getElementById "application" (HTMLDocument.toNonElementParentNode doc)
         applicationCanvas <- except $ note "applicationCanvas not found" maybeApplicationCanvas
         applicationCanvasAsElement <- except $ note "applicationCanvas could not be converted to HTMLCanvasElement" (HTMLCanvasElement.fromElement applicationCanvas)
@@ -548,24 +546,16 @@ main = launchAff_ do
         nullableWebGL2Context <- liftEffect $ WebGL2.getContext applicationCanvasAsElement
         webGL2Context <- except $ note "WebGL2 not supported" (toMaybe nullableWebGL2Context)
 
-        -- Question: I want to analyze the totality of this piece of code, and extract it into its own function, I was thinking about 1) creating a function that abstracts what is common between this and the next piece, and 2) creating its own function to just clean up this function a little more. See which layers are involved, the validations, etc
         vertexShader <- makeShader webGL2Context VertexShader vertexShaderSourceCode
-
-        -- Question: I want to analyze the totality of this piece of code, and extract it into its own function, see prev question
         fragmentShader <- makeShader webGL2Context FragmentShader fragmentShaderSourceCode
 
         program <- makeProgram webGL2Context { vertex: vertexShader, fragment: fragmentShader }
         liftEffect $ WebGL2.useProgram webGL2Context program
-
-        -- Note: This is part of the WebGL2 setup
         liftEffect $ WebGL2.enable webGL2Context WebGL2.depthTest
 
         -- [Getting the WebGL location of shader attributes and uniforms, and setting up initial values]
-        -- Note: All this block, and getting all the locations, originally was something that I thought I could put into a function to clean this main a little, but then I realized that I don't want to  abstract these details, because what could I return a tuple? And the typing does not gimme enough info to infer that the location is for this this and that. Also, some validate in one way, some in another. If I created a function it would be called something monstruous such as get maybe position, projection, view and model locations... Although we might follow our progression and through common find patterns, the naming (it already has some naming to it) a type expressing the idea we want to abstract and if all is good find the right abstraction
         positionLocation <- liftEffect $ WebGL2.getAttribLocation webGL2Context program "a_position"
-        _ <- if positionLocation == -1
-            then except $ Left "Unable to get the location of the position attribute"
-            else except $ Right "Position attribute location obtained successfully"
+        when (positionLocation == -1) $ except $ Left "Unable to get the location of the position attribute"
 
         projectionLocation <- findUniformLocation webGL2Context program "u_projection"
         liftEffect $ WebGL2.uniformMatrix4fv webGL2Context projectionLocation false (Math.Mat4.toFloat32Array Math.Mat4.identity)
@@ -579,8 +569,6 @@ main = launchAff_ do
         colorLocation <- findUniformLocation webGL2Context program "u_color"
         liftEffect $ WebGL2.uniform4fv webGL2Context colorLocation (Primitives.float32Array [0.0, 0.8, 0.0, 1.0])
 
-        -- [WIP: Abstracting new structure]
-        -- Note: Here I want to add a new list of models, not just a cube, and then be able to select which one I want to spawn :P I know I'm going to need some text maybe or some other way to select the model (even rendering them in a palette for example), I also want to start thinking about the scene as a graph, but without losing performance, can we use lists or arrays? Are they more performant?
         let cubeGeometryId = GeometryId "cube"
             cubeGeometry =
                 { vertices: cubeVertices
@@ -589,10 +577,8 @@ main = launchAff_ do
                 , topology: Lines
                 }
 
-        cubeGPUHandleResult <- liftEffect $ runExceptT $ uploadGeometry webGL2Context positionLocation cubeGeometry
-        cubeGPUHandle <- except cubeGPUHandleResult
+        cubeGPUHandle <- uploadGeometry webGL2Context positionLocation cubeGeometry
 
-        -- Note: Here we would see a change when we change the function generateRandomXYZ
         cubePosition <- liftEffect $ generateRandomTranslation
         let cubeSceneObjectId = SceneObjectId "cube-instance-1"
             cubeSceneObject =
@@ -608,7 +594,6 @@ main = launchAff_ do
             geometries = Map.singleton cubeGeometryId cubeGeometry
             gpuHandles = Map.singleton cubeGeometryId cubeGPUHandle
 
-        -- Note: I want to audit the initial world state
         let initialWorldState =
                 { geometries
                 , gpuHandles
@@ -627,10 +612,8 @@ main = launchAff_ do
                 , interaction: Observing
                 }
 
-        -- Note: I don't know if I want my functions to be aware of the world state, maybe there are some that have to live at this level of abstraction, but I don't know. Also, at which point does my engine become general enough to brand it as some sort of blender, model viewer, or whatever, and not just an experience? I guess when we have a scene graph, a way to import models, lights, materials, etc. But maybe we can start adding some of these features and see how it evolves, maybe we find that we need to refactor some of the code to make it more general, or maybe we find that it's already general enough and we just need to add features on top of it. I guess we will see
         worldStateRef <- liftEffect $ Ref.new initialWorldState
 
-        -- Note: How do this differs and compares to the geometry upload generally? Beyond what we've analyzed
         handSkeletonJointIndicesBuffer <- makeBuffer webGL2Context
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
         liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (Primitives.u16AsArrayBufferView (Primitives.uint16Array handSkeletonByJointIndices)) WebGL2.staticDraw
@@ -673,41 +656,31 @@ main = launchAff_ do
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
         liftEffect $ WebGL2.bindVertexArray webGL2Context null
 
-        -- Note: To this point, I think all is just setup, and at the end we have is... a world state? And some resources ready to be used in the experience, but the experience is not running yet, we need to start the XR session and then we can start rendering and updating the world state based on the inputs and interactions
         -- [Starting the experience on button click and running the main loop]
         let runExperience :: Window -> Navigator -> WebGL2.RenderingContext -> Aff (Either String Unit)
             runExperience xrWin xrNav xrWebGL2Context = runExceptT do
                 -- [Getting the XR-related resources]
-                -- Note: Here we're interfacing with the WebXR API to get the XR system, check for session support, request a session, and set up the rendering loop. This is where we start to see the experience come to life, as we manage the XR session and handle the input data from hand tracking to update our world state and render the scene accordingly.
                 nullableXRSystem <- liftEffect $ WebXR.getXRSystem xrNav
                 xrSystem <- except $ note "WebXR not supported" (toMaybe nullableXRSystem)
 
-                -- Note: Can we just extract run experience into its own experience? I think it might receive a WorldState and then returning the runExperience function itself, but I don't want to do this directly, I think the wisest way to approach it is to list all the references from outside this scope, and encapsulate them within the world state.
                 isWebXRSessionModeSupported <- liftAff $ isWebXRSessionModeSupported xrSystem "immersive-ar"
-                _ <- if not isWebXRSessionModeSupported
-                    then except $ Left "WebXR session mode not supported"
-                    else except $ Right "WebXR session mode supported"
+                unless isWebXRSessionModeSupported $ except $ Left "WebXR session mode not supported"
                 liftAff $ makeXRWebGL2Compatible xrWebGL2Context
 
-                -- Note: I want my types to be honest here I've been declaring a lot of things explicitly as I use them but I want to explore with other types of experiences
                 xrSession <- liftAff $ requestSession xrSystem "immersive-ar" { requiredFeatures: ["hand-tracking"] }
                 xrGLLayer <- liftEffect $ WebXR.createXRWebGLLayer xrWin xrSession xrWebGL2Context
                 liftEffect $ WebXR.updateRenderState xrSession { baseLayer: xrGLLayer }
 
-                -- Note: I would like to move within a boundary, right now I can only use the app in a single position.
                 referenceSpace <- liftAff $ requestReferenceSpace xrSession "local"
 
-                -- Note: Isn't this part of the world state?
                 let leftHandVertices = Primitives.float32Array (replicate (numberOfHandJointDimensions) 0.0)
                     rightHandVertices = Primitives.float32Array (replicate (numberOfHandJointDimensions) 0.0)
 
                 -- [Callback for tick updates from the XR session]
-                -- Note: Maybe we have to move this outside the runExperience function, but then, how do we know which function calls what and how is this different from the theoretical tick I'm think of that is only involved with the world state update? And what if I wanted to run this from a browser to for example see what I'm projecting as if it was a class, but for people who don't have VR? I don't want my logic to be here because I might have to declare another way to tick the experience, here also we're just capturing the input, translating it to world state, and then rendering based on the world state, and capturing gestures, etc, etc
                 let tick :: WebXR.XRFrameRequestCallback
                     tick _ frame = do
                         result <- runExceptT do
                             -- [Managing hand tracking data]
-                            -- Note: This might be a function in its own layer
                             inputSources <- liftEffect $ WebXR.getInputSources xrSession
                             for_ inputSources \inputSource -> void $ runExceptT do
                                 nullableHand <- liftEffect $ WebXR.getHand inputSource
@@ -827,8 +800,7 @@ main = launchAff_ do
         -- [Adding event listener to the start experience button]
         maybeStartButton <- liftEffect $ getElementById "start-experience" (HTMLDocument.toNonElementParentNode doc)
         startButtonElement <- except $ note "Start experience button not found" maybeStartButton
-        maybeStartButtonAsHtmlButtonElement <- pure $ HTMLButtonElement.fromElement startButtonElement
-        startButtonAsHtmlButtonElement <- except $ note "Start experience button could not be converted to HTMLButtonElement" maybeStartButtonAsHtmlButtonElement
+        startButtonAsHtmlButtonElement <- except $ note "Start experience button could not be converted to HTMLButtonElement" (HTMLButtonElement.fromElement startButtonElement)
         let eventTarget = Element.toEventTarget (HTMLElement.toElement (HTMLButtonElement.toHTMLElement startButtonAsHtmlButtonElement))
         listener <- liftEffect $ EventTarget.eventListener \_ -> launchAff_ $ do
             result' <- runExperience win nav webGL2Context
