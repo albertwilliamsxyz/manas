@@ -1,6 +1,7 @@
 module WebGL2
   ( ShaderType(..)
   , makeShader
+  , makeProgram
   ) where
 
 import Prelude
@@ -39,3 +40,25 @@ makeShader gl shaderType source = do
       nullableLog <- liftEffect $ Raw.getShaderInfoLog gl shader
       liftEffect $ Raw.deleteShader gl shader
       except $ Left $ fromMaybe "Unknown shader compile error" (toMaybe nullableLog)
+
+
+makeProgram
+  :: forall m. MonadEffect m
+  => Raw.RenderingContext
+  -> { vertex :: Raw.Shader, fragment :: Raw.Shader }
+  -> ExceptT String m Raw.Program
+makeProgram gl shaders = do
+  nullableProgram <- liftEffect $ Raw.createProgram gl
+  program <- except $ note "Program could not be created" (toMaybe nullableProgram)
+  liftEffect $ Raw.attachShader gl program shaders.vertex
+  liftEffect $ Raw.attachShader gl program shaders.fragment
+  liftEffect $ Raw.linkProgram gl program
+  status <- liftEffect $ Raw.getProgramParameter gl program Raw.linkStatus
+  if unsafeCoerce status :: Boolean
+    then pure program
+    else do
+      nullableLog <- liftEffect $ Raw.getProgramInfoLog gl program
+      liftEffect $ Raw.deleteShader gl shaders.vertex
+      liftEffect $ Raw.deleteShader gl shaders.fragment
+      liftEffect $ Raw.deleteProgram gl program
+      except $ Left $ fromMaybe "Unknown program link error" (toMaybe nullableLog)

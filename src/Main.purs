@@ -20,7 +20,6 @@ import Effect.Class (liftEffect)
 import Effect.Console (log)
 import Effect.Random (random)
 import Effect.Ref as Ref
-import Unsafe.Coerce (unsafeCoerce)
 import Math.Geometry as Math.Geometry
 import Math.Mat4 (Mat4)
 import Math.Mat4 as Math.Mat4
@@ -37,7 +36,7 @@ import Web.HTML.HTMLCanvasElement as HTMLCanvasElement
 import Web.HTML.HTMLDocument as HTMLDocument
 import Web.HTML.HTMLElement as HTMLElement
 import Web.HTML.Window (document, navigator)
-import WebGL2 (ShaderType(..), makeShader)
+import WebGL2 (ShaderType(..), makeShader, makeProgram)
 import WebGL2.Raw as WebGL2
 import WebXR as WebXR
 
@@ -557,24 +556,8 @@ main = launchAff_ do
         -- Question: I want to analyze the totality of this piece of code, and extract it into its own function, see prev question
         fragmentShader <- makeShader webGL2Context FragmentShader fragmentShaderSourceCode
 
-        -- Question: I'm this can be extracted too
-        nullableProgram <- liftEffect $ WebGL2.createProgram webGL2Context
-        program <- except $ note "Program could not be created" (toMaybe nullableProgram)
-        liftEffect $ WebGL2.attachShader webGL2Context program vertexShader
-        liftEffect $ WebGL2.attachShader webGL2Context program fragmentShader
-        liftEffect $ WebGL2.linkProgram webGL2Context program
-        programLinkStatus <- liftEffect $ WebGL2.getProgramParameter webGL2Context program WebGL2.linkStatus
-        let programCompiledSuccessfully = unsafeCoerce programLinkStatus :: Boolean
-        _ <- if not programCompiledSuccessfully
-            then do
-                nullableErrorMessage <- liftEffect $ WebGL2.getProgramInfoLog webGL2Context program
-                liftEffect $ WebGL2.deleteShader webGL2Context vertexShader
-                liftEffect $ WebGL2.deleteShader webGL2Context fragmentShader
-                liftEffect $ WebGL2.deleteProgram webGL2Context program
-                except $ Left $ fromMaybe "Unknown Error when linking program" (toMaybe nullableErrorMessage)
-            else do
-                liftEffect $ WebGL2.useProgram webGL2Context program
-                except $ Right "Program created successfully"
+        program <- makeProgram webGL2Context { vertex: vertexShader, fragment: fragmentShader }
+        liftEffect $ WebGL2.useProgram webGL2Context program
 
         -- Note: This is part of the WebGL2 setup
         liftEffect $ WebGL2.enable webGL2Context WebGL2.depthTest
