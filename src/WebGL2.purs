@@ -2,6 +2,8 @@ module WebGL2
   ( ShaderType(..)
   , makeShader
   , makeProgram
+  , makeBuffer
+  , makeVertexArrayObject
   ) where
 
 import Prelude
@@ -62,3 +64,23 @@ makeProgram gl shaders = do
       liftEffect $ Raw.deleteShader gl shaders.fragment
       liftEffect $ Raw.deleteProgram gl program
       except $ Left $ fromMaybe "Unknown program link error" (toMaybe nullableLog)
+
+
+makeBuffer
+  :: forall m. MonadEffect m
+  => Raw.RenderingContext
+  -> String
+  -> ExceptT String m Raw.Buffer
+makeBuffer gl description = do
+  nullableBuffer <- liftEffect $ Raw.createBuffer gl
+  except $ note (description <> " could not be created") (toMaybe nullableBuffer)
+
+
+makeVertexArrayObject
+  :: forall m. MonadEffect m
+  => Raw.RenderingContext
+  -> String
+  -> ExceptT String m Raw.VertexArrayObject
+makeVertexArrayObject gl description = do
+  nullableVAO <- liftEffect $ Raw.createVertexArray gl
+  except $ note (description <> " could not be created") (toMaybe nullableVAO)

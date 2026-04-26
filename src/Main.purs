@@ -36,7 +36,7 @@ import Web.HTML.HTMLCanvasElement as HTMLCanvasElement
 import Web.HTML.HTMLDocument as HTMLDocument
 import Web.HTML.HTMLElement as HTMLElement
 import Web.HTML.Window (document, navigator)
-import WebGL2 (ShaderType(..), makeShader, makeProgram)
+import WebGL2 (ShaderType(..), makeShader, makeProgram, makeBuffer, makeVertexArrayObject)
 import WebGL2.Raw as WebGL2
 import WebXR as WebXR
 
@@ -355,12 +355,9 @@ addCubeToScene position worldState = worldState
 
 uploadGeometry :: WebGL2.RenderingContext -> Int -> Geometry -> ExceptT String Effect GPUHandle
 uploadGeometry webGL2Context positionLocation geometry = do
-    nullableVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
-    vao <- except $ note "VAO could not be created" (toMaybe nullableVAO)
-    nullableVertexBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
-    vertexBuffer <- except $ note "Vertex buffer could not be created" (toMaybe nullableVertexBuffer)
-    nullableIndexBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
-    indexBuffer <- except $ note "Index buffer could not be created" (toMaybe nullableIndexBuffer)
+    vao <- makeVertexArrayObject webGL2Context "VAO"
+    vertexBuffer <- makeBuffer webGL2Context "Vertex buffer"
+    indexBuffer <- makeBuffer webGL2Context "Index buffer"
     liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull vao)
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer vertexBuffer
     liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (Primitives.f32AsArrayBufferView (Primitives.float32Array geometry.vertices)) WebGL2.staticDraw
@@ -637,15 +634,12 @@ main = launchAff_ do
         worldStateRef <- liftEffect $ Ref.new initialWorldState
 
         -- Note: How do this differs and compares to the geometry upload generally? Beyond what we've analyzed
-        nullableHandSkeletonJointIndicesBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
-        handSkeletonJointIndicesBuffer <- except $ note "Hand skeleton joint indices buffer could not be created" (toMaybe nullableHandSkeletonJointIndicesBuffer)
+        handSkeletonJointIndicesBuffer <- makeBuffer webGL2Context "Hand skeleton joint indices buffer"
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
         liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (Primitives.u16AsArrayBufferView (Primitives.uint16Array handSkeletonByJointIndices)) WebGL2.staticDraw
 
-        nullableLeftHandVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
-        leftHandVAO <- except $ note "Left hand VAO could not be created" (toMaybe nullableLeftHandVAO)
-        nullableLeftHandBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
-        leftHandBuffer <- except $ note "Left hand buffer could not be created" (toMaybe nullableLeftHandBuffer)
+        leftHandVAO <- makeVertexArrayObject webGL2Context "Left hand VAO"
+        leftHandBuffer <- makeBuffer webGL2Context "Left hand buffer"
         liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull leftHandVAO)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer leftHandBuffer
         liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (
@@ -655,8 +649,7 @@ main = launchAff_ do
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
         liftEffect $ WebGL2.bindVertexArray webGL2Context null
 
-        nullableLeftHandSkeletonVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
-        leftHandSkeletonVAO <- except $ note "Left hand skeleton VAO could not be created" (toMaybe nullableLeftHandSkeletonVAO)
+        leftHandSkeletonVAO <- makeVertexArrayObject webGL2Context "Left hand skeleton VAO"
         liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull leftHandSkeletonVAO)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer leftHandBuffer
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
@@ -664,10 +657,8 @@ main = launchAff_ do
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
         liftEffect $ WebGL2.bindVertexArray webGL2Context null
 
-        nullableRightHandVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
-        rightHandVAO <- except $ note "Right hand VAO could not be created" (toMaybe nullableRightHandVAO)
-        nullableRightHandBuffer <- liftEffect $ WebGL2.createBuffer webGL2Context
-        rightHandBuffer <- except $ note "Right hand buffer could not be created" (toMaybe nullableRightHandBuffer)
+        rightHandVAO <- makeVertexArrayObject webGL2Context "Right hand VAO"
+        rightHandBuffer <- makeBuffer webGL2Context "Right hand buffer"
         liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull rightHandVAO)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer rightHandBuffer
         liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (
