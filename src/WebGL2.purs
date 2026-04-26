@@ -69,18 +69,16 @@ makeProgram gl shaders = do
 makeBuffer
   :: forall m. MonadEffect m
   => Raw.RenderingContext
-  -> String
   -> ExceptT String m Raw.Buffer
-makeBuffer gl description = do
+makeBuffer gl = do
   nullableBuffer <- liftEffect $ Raw.createBuffer gl
-  except $ note (description <> " could not be created") (toMaybe nullableBuffer)
+  except $ note "Buffer could not be created" (toMaybe nullableBuffer)
 
 
 makeVertexArrayObject
   :: forall m. MonadEffect m
   => Raw.RenderingContext
-  -> String
   -> ExceptT String m Raw.VertexArrayObject
-makeVertexArrayObject gl description = do
-  nullableVAO <- liftEffect $ Raw.createVertexArray gl
-  except $ note (description <> " could not be created") (toMaybe nullableVAO)
+makeVertexArrayObject gl = do
+  nullableVertexArrayObject <- liftEffect $ Raw.createVertexArray gl
+  except $ note "Vertex array object could not be created" (toMaybe nullableVertexArrayObject)

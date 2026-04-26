@@ -355,9 +355,9 @@ addCubeToScene position worldState = worldState
 
 uploadGeometry :: WebGL2.RenderingContext -> Int -> Geometry -> ExceptT String Effect GPUHandle
 uploadGeometry webGL2Context positionLocation geometry = do
-    vao <- makeVertexArrayObject webGL2Context "VAO"
-    vertexBuffer <- makeBuffer webGL2Context "Vertex buffer"
-    indexBuffer <- makeBuffer webGL2Context "Index buffer"
+    vao <- makeVertexArrayObject webGL2Context
+    vertexBuffer <- makeBuffer webGL2Context
+    indexBuffer <- makeBuffer webGL2Context
     liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull vao)
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer vertexBuffer
     liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (Primitives.f32AsArrayBufferView (Primitives.float32Array geometry.vertices)) WebGL2.staticDraw
@@ -634,12 +634,12 @@ main = launchAff_ do
         worldStateRef <- liftEffect $ Ref.new initialWorldState
 
         -- Note: How do this differs and compares to the geometry upload generally? Beyond what we've analyzed
-        handSkeletonJointIndicesBuffer <- makeBuffer webGL2Context "Hand skeleton joint indices buffer"
+        handSkeletonJointIndicesBuffer <- makeBuffer webGL2Context
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
         liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (Primitives.u16AsArrayBufferView (Primitives.uint16Array handSkeletonByJointIndices)) WebGL2.staticDraw
 
-        leftHandVAO <- makeVertexArrayObject webGL2Context "Left hand VAO"
-        leftHandBuffer <- makeBuffer webGL2Context "Left hand buffer"
+        leftHandVAO <- makeVertexArrayObject webGL2Context
+        leftHandBuffer <- makeBuffer webGL2Context
         liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull leftHandVAO)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer leftHandBuffer
         liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (
@@ -649,7 +649,7 @@ main = launchAff_ do
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
         liftEffect $ WebGL2.bindVertexArray webGL2Context null
 
-        leftHandSkeletonVAO <- makeVertexArrayObject webGL2Context "Left hand skeleton VAO"
+        leftHandSkeletonVAO <- makeVertexArrayObject webGL2Context
         liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull leftHandSkeletonVAO)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer leftHandBuffer
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
@@ -657,8 +657,8 @@ main = launchAff_ do
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer handSkeletonJointIndicesBuffer
         liftEffect $ WebGL2.bindVertexArray webGL2Context null
 
-        rightHandVAO <- makeVertexArrayObject webGL2Context "Right hand VAO"
-        rightHandBuffer <- makeBuffer webGL2Context "Right hand buffer"
+        rightHandVAO <- makeVertexArrayObject webGL2Context
+        rightHandBuffer <- makeBuffer webGL2Context
         liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull rightHandVAO)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer rightHandBuffer
         liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (
@@ -668,8 +668,7 @@ main = launchAff_ do
         liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
         liftEffect $ WebGL2.bindVertexArray webGL2Context null
 
-        nullableRightHandSkeletonVAO <- liftEffect $ WebGL2.createVertexArray webGL2Context
-        rightHandSkeletonVAO <- except $ note "Right hand skeleton VAO could not be created" (toMaybe nullableRightHandSkeletonVAO)
+        rightHandSkeletonVAO <- makeVertexArrayObject webGL2Context
         liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull rightHandSkeletonVAO)
         liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer rightHandBuffer
         liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
