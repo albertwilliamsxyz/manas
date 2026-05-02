@@ -9,7 +9,8 @@ No code changes. Only comments and analysis.
   - Sub-blocks: [Vec3 Operations], [Mat4 Operations], [Mat4 Queries], [Spatial Operations]
   - Annotated: type dishonesty (forall a), Effect inconsistency, totality issues, Phase 2 names, design choices, composition opportunities
 - [x] Comment ForeignUtils.js with matching blocks
-- [ ] Verify Main.purs section comments reflect discovered layers
+- [x] Verify Main.purs section comments reflect discovered layers
+  - Comment cleanup pass removed addressed/speculative comments; section headers preserved as the discovered layers
 - [x] Totality audit: find every fromMaybe, !!, incomplete pattern match in Main
   - Classified each: programmer error vs system condition
   - Two real issues: getVertex and rayMeshIntersect silence out-of-bounds with fromMaybe
@@ -22,60 +23,13 @@ No code changes. Only comments and analysis.
 ## Phase 2: Linear algebra foundation
 Create Vec3 and Mat4 modules. ForeignUtils dissolves.
 
-- [ ] Vec3.purs + Vec3.js
-  - newtype Vec3 with private constructor
-  - Smart constructors: vec3
-  - Extract what exists (used in Main today):
-    - sub, add, dot, cross, normalize, midpoint, distance
-    - Rename: sub3→sub, get3DDistance→distance, normalize3→normalize, etc.
-  - Add when needed (not used yet — reference for future):
-    - zero: identity element of addition; makes normalize3's silent [0,0,0] explicit
-    - scale: scalar multiplication; unlocks lerp, spring physics, weighted averages
-      - lerp t a b = add (scale (1-t) a) (scale t b) → smooth hand tracking, animated transitions
-      - force = scale (-k) displacement → spring/snap-back interactions
-      - center of mass of N points = weighted sum via scale + add
-    - negate: reverse direction; needed for reflection, explicit direction reversal
-      - reflect v n = sub v (scale (2 * dot v n) n) → bounce, mirror effects
-    - length: magnitude; sqrt(dot v v), total (always >= 0)
-      - guard normalize: if length v > epsilon then normalize else fallback → totality solved
-      - speed = length velocity → gesture speed detection (tap vs drag)
-      - already implicitly used: sqrt(dot rotationAxis rotationAxis) on line 544
-  - Algebraic structure: add + zero + negate = abelian group; + scale = vector space; + dot = inner product space
-  - Derivation hierarchy: dot → length → distance (each derived from the one before)
-  - Totality question: normalize :: Vec3 → Maybe Vec3? Decide when extracting.
-  - Compile and verify
-- [ ] Mat4.purs + Mat4.js
-  - newtype Mat4 with private constructor
-  - Extract what exists (used in Main today):
-    - multiply, fromTranslation, fromAxisAngle, transformPoint, translationOf, scaleOf
-    - identity — currently defined in Main as identityMatrix4x4Float32, belongs here
-    - fromScale — Main builds scale matrices manually (lines 530-535), replaces real code
-    - Rename: multiplyMatrix4x4→multiply, getTranslationFromMatrix→translationOf, etc.
-  - Add when needed (not used yet — reference for future):
-    - inverse: Mat4 → Mat4; unlocks efficient ray casting and space conversions
-      - Current rayMeshIntersect transforms every vertex to world space (3×N transforms per mesh)
-      - With inverse: transform ray to local space once (1 transform), test against local vertices
-      - For 12-triangle cube: 1 transform vs 36. For complex models: critical.
-      - Theory: covariance vs contravariance — push geometry forward or pull query backward
-      - Also needed for: camera math (view matrix = inverse of camera model matrix)
-    - fromScale3 :: Vec3 → Mat4 — non-uniform scale (stretch along one axis); uniform is enough for now
-  - Monoid structure: (Mat4, multiply, identity) — associative + identity element
-  - Constructors family: fromTranslation + fromAxisAngle + fromScale = T·R·S
-    - These don't commute: T·R·S ≠ S·R·T (non-abelian)
-  - Compile and verify
-- [ ] Migrate ForeignUtils → Vec3 + Mat4
-  - What remains (TypedArray primitives, copyInto, subarray) stays as TypedArray module or in ForeignUtils
-- [ ] Update Main.purs to use Vec3 and Mat4
-  - Transform fields: Float32Array → Vec3 / Mat4
-  - composeModelMatrix → interpretTransform
-  - addCubeToScene → addObjectToScene (parametrize by GeometryId)
-  - generateRandomTranslationMatrix4x4Float32 → randomPosition :: Effect Vec3
-  - makeTranslationMatrix dissolves — it only exists because getAt is Effect; with Vec3, just use fromTranslation
-  - get3DDistanceFromMatrix dissolves — becomes distance p (translationOf m)
-  - Manual scale matrix (lines 530-535) becomes fromScale scaleFactor
-  - sqrt(dot rotationAxis rotationAxis) becomes length rotationAxis
-  - identityMatrix4x4Float32 moves to Mat4.identity
-  - All naming changes propagate
+- [x] Vec3.purs + Vec3.js → `src/Math/Vec3.{purs,js}`
+- [x] Mat4.purs + Mat4.js → `src/Math/Mat4.{purs,js}`
+- [x] Geometry.purs + Geometry.js → `src/Math/Geometry.{purs,js}` (rayTriangleIntersect; emerged during refactor)
+- [x] Primitives module extracted (TypedArray machinery: getAt, setAt, copyInto, subarray, conversions) → `src/Primitives.{purs,js}`
+- [x] ForeignUtils dissolved
+- [x] Main.purs migrated to Vec3, Mat4, Geometry, Primitives
+- [ ] **Outstanding**: migrate `Geometry.vertices` from `Array Number` to `Array Vec3` to resolve `fromMaybe`-paranoia in `getVertex` and `rayMeshIntersect` (Main.purs:297-324). Cross-cutting: touches Geometry type, vertex iteration, and `uploadGeometry` (which flattens back to Float32Array for the GPU).
 
 ## Phase 2.5: Restructure GPU resource setup
 uploadGeometry fuses structure setup + data upload. Separate into two steps.
@@ -87,14 +41,12 @@ uploadGeometry fuses structure setup + data upload. Separate into two steps.
 - [ ] Design signatures before implementing
 - [ ] Enables future modifiable geometry
 
-## Phase 2.75: Shader compilation extraction
-Extract repeated WebGL2 patterns from main into WebGL2 idiomatic layer.
+## Phase 2.75: Shader compilation extraction (done)
+Delivered as `makeShader` and `makeProgram` in WebGL2 idiomatic. Wave 3-4 of the refactor expanded the layer further with `makeBuffer`, `makeVertexArrayObject`, `findUniformLocation`.
 
-- [ ] compileShader :: RenderingContext -> ShaderType -> String -> ExceptT String Effect Shader
-  - Vertex + fragment shader compilation are the same pattern (lines 576-602)
-- [ ] linkProgram :: RenderingContext -> Shader -> Shader -> ExceptT String Effect Program
-  - Program creation + linking + error handling (lines 604-620)
-- [ ] These live in WebGL2 idiomatic layer, not in Main
+- [x] makeShader :: forall m. MonadEffect m => RenderingContext -> ShaderType -> String -> ExceptT String m Shader
+- [x] makeProgram :: forall m. MonadEffect m => RenderingContext -> Shader -> Shader -> ExceptT String m Program
+- [x] All live in WebGL2 idiomatic layer, not in Main
 
 ## Phase 3: Separate initialization from render loop
 ExceptT out of the hot path. Pipeline stages become visible.
@@ -135,10 +87,88 @@ Domain types for transforms, GPU conversion at the boundary.
 - [ ] Transform uses Vec3 for position, new rotation type, Vec3 or Number for scale
 - [ ] interpretTransform converts domain Transform → Mat4 at render boundary
 
+## Phase 7+: Creative trajectory
+Phases 1-6 are the technical refactor. Phases 7+ are creative direction — what the project becomes once foundations are solid. Trajectory rather than strict ordering: textures and UI lean on each other; illumination is optional alongside any of them.
+
+## Phase 7: Controllers + gesture intent
+Faster testing on couch, plus the substrate to abstract gesture *intent* from gesture *mechanism*.
+
+- [ ] Detect XRInputSource type (hand vs gamepad)
+- [ ] Read controller buttons, triggers, grips, thumbsticks
+- [ ] Define abstract gesture types: Trigger, Grab, TwoHandTrigger, TwoHandGrab, Drag, Hover, Point
+- [ ] Map hand mechanism → abstract gesture
+- [ ] Map controller mechanism → abstract gesture
+- [ ] Replace direct pinch-distance checks in Main with abstract gesture events
+- [ ] Both modalities coexist (hands + controllers active simultaneously)
+- The vocabulary lives at intent level — the right level for an instrument.
+
+## Phase 8: Textures
+Visual decoration applied to objects to enrich their appearance. A cube wearing a brick texture is still a cube — geometry is primal, texture is overlay. Imported and generated coexist; neither is privileged. Lets primitive objects participate in scenes that depict things (a brick wall, a tiled floor, a labeled object) without sculpting detail into geometry.
+
+- [ ] Raw layer: createTexture, deleteTexture, bindTexture, texImage2D (image source + data source variants), texParameteri, generateMipmap, activeTexture
+- [ ] Idiomatic constructors: makeTextureFromImage (HTMLImageElement → Texture) and makeTextureFromData ({width, height, data} → Texture). Both wrap create + bind + upload + parameters + mipmap as one call.
+- [ ] Add UV coordinates to Geometry — per-vertex `vec2` attribute. Bake sensible default UV unwrappings per primitive (cube: six-face; sphere: equirectangular; pyramid: triangle-net).
+- [ ] uploadGeometry configures both position and UV attributes; VAO has two attribute pointers.
+- [ ] Vertex shader: `aUV` attribute, `vUV` varying. Fragment shader: `uniform sampler2D uTex`, `texture(uTex, vUV)`.
+- [ ] TextureId + registry (lives in RenderState alongside geometry registry — same Phase 4 pattern)
+- [ ] Scene objects gain optional TextureId reference; default 1×1 white texture so shader works uniformly
+- [ ] Per-draw-call texture binding in render loop
+- [ ] First textures: 1×1 white (default), one imported (brick image), one procedural (checker pattern computed in shader, no upload)
+- Procedural fragment-shader effects (noise, fresnel, gradients) are first-class alongside imported textures — they're "textures" in the same pipeline slot, just generated per-fragment instead of sampled.
+
+## Phase 9: UI as world (surfaces)
+The world is uniform — UI is composition that invokes behavior, not an interface overlaid on the scene.
+
+- [ ] Surface primitive — flat (later curved) region of composition that carries text, texture, interaction
+- [ ] Text rendering: glyph atlas as imported texture, surface as canvas
+- [ ] Interactive surfaces: emit events on proximity, pinch, drag (via Phase 7 gesture intents)
+- [ ] First UI artifact: the spawn palette — palm-up reveals labeled, textured, interactive surfaces; pinch to spawn
+- Position: button = interactive surface with label. Slider = surface with draggable child. Panel = surface holding surfaces. The UI vocabulary is one primitive composed differently.
+
+## Phase 10: Illumination
+Tool for legibility *and* aesthetic. Default look is marble-like: pristine white/black with shine. Phong/Blinn-Phong is the right level — PBR is overkill.
+
+- [ ] Per-vertex normals on geometry (third attribute alongside position + UV). Flat shading replicates per face; smooth shading averages at vertices. Decide per-primitive.
+- [ ] Vertex shader passes interpolated normal as varying.
+- [ ] Fragment shader: ambient + diffuse (Lambert: `max(dot(N, L), 0)`) + specular (Blinn-Phong: `pow(max(dot(N, H), 0), shininess)` with shininess ~64-128 for polished).
+- [ ] One directional light fixed in scene to start; uniforms for direction + color.
+- [ ] Optional: fresnel rim glow (`1 - dot(N, V)`) — edges brighten, looks expensive, costs nothing.
+- [ ] Optional: cubemap environment reflection — what makes polished surfaces genuinely shiny vs just specular-highlighted. The marble secret ingredient.
+- [ ] Alternate aesthetic — normal-as-color (`color = abs(normalize(normal))`): mathematical/diagrammatic look. Useful for debug and possibly as a switchable mode later.
+- [ ] Placeable lights as scene-graph objects (after Phase 11)
+- Don't pursue PBR — imports a video-game material model that competes with sculptural restraint. Phong is enough; ~15 fragment-shader lines for marble-grade light.
+
+## Phase 11: Scene graph
+Hierarchical composition. Geometry as referenced resource, scene objects as instances. Transform propagation falls out of the math.
+
+- [ ] Geometry referenced by id (extends Phase 4 GeometryId bridge)
+- [ ] SceneObject = { transform, content } where content = Leaf GeometryId | Composition (Array SceneObject)
+- [ ] World transform computed at render time: `parent.world ∘ node.local` — no stored mutation propagation
+- [ ] Manipulation of parent updates descendants for free (rotate parent → all children rotate)
+- [ ] Bake operation: `child.local := child.world; reparent to root` — for the CAD "lock" gesture
+- [ ] Tree first (one parent per child); DAG (shared instances) when needed
+- [ ] Finite for now (no self-reference)
+- Future direction: recursive compositions with stop conditions (depth, scale, distance, predicate) — same data type, just allow self-references at traversal. Bridges scene graph to generative art (fractals, L-systems, IFS) as a direct extension.
+
+## Phase 12: CAD construction loop
+Vertex/edge/face → composition. The original AutoCAD/Blender vision in spatial form.
+
+- [ ] Vertex placement by pinch (in-air)
+- [ ] Edge by two-vertex pinch (one per hand)
+- [ ] Face by closed selection of edges/vertices
+- [ ] Snap-to-vertex during placement (proximity threshold ε)
+- [ ] Lock gesture → composition (frozen subtree as single manipulable object via Phase 11 bake)
+- [ ] Compositions appear in spawn palette alongside primitives (Phase 9)
+- Design question to decide before compositions are reused: when a composition is used inside another, does it reference (edits propagate) or copy (independent)? Blender: copy with linked-instance opt-in. AutoCAD: block references. Affects whether a fractal can be built as recursive self-reference.
+
 ## Bugs / Inconsistencies found
 - [ ] nextObjectId starts at 1 but initial cube uses SceneObjectId "cube-instance-1" (string, not from counter)
   - First spawn generates SceneObjectId "1" — works by accident, not design
   - Fix: either use counter for initial cube too, or start counter at a different value
+- [ ] gl_POINTS rendered with constant `gl_PointSize` stay the same screen-pixel size regardless of distance, so distant points appear oversized relative to perspective-shrinking geometry
+  - Affects hand joint rendering (or any point-rendered vertices)
+  - Fix: in vertex shader, scale by clip-space depth — `gl_PointSize = K / gl_Position.w` (or compute view-space distance and divide)
+  - Alternative: render points as small geometry (quads or spheres) instead of gl_POINTS
 
 ## Observations from Phase 1 analysis
 
@@ -156,15 +186,15 @@ Domain types for transforms, GPU conversion at the boundary.
   - Resolve when separating WorldState from RenderState
 - "immersive-ar" hardcoded as string — future: SessionMode ADT
 - "local" reference space limits movement — future: "local-floor" or "bounded-floor"
-- Model palette / selection UI — future feature
+- Model palette / selection UI — superseded by Phase 9 (UI as world / spawn palette)
 - Tick portability: readInput is the only XR-coupled step, rest is universal
   - Enables browser mode without VR for viewing/teaching
 
 ## Future (no order, do when needed)
 - [ ] Type class for shared vector operations (if Vec4 or other Vec types appear)
 - [ ] Type-level Int exploration (Vec :: Int -> Type)
-- [ ] WebGL2 two sub-layers fully formalized
-- [ ] WebXR two sub-layers formalized
+- [x] WebGL2 two sub-layers fully formalized
+- [x] WebXR two sub-layers formalized
 - [ ] WebGL2 type fixes: replace `forall a` with typed arrays, decide on Int aliases
 - [ ] WebGPU migration (RenderState + executeRenderCommands swap, WorldState unchanged)
 - [ ] Interpreter pattern via purescript-run

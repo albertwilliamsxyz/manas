@@ -1,9 +1,12 @@
 module WebGL2
   ( ShaderType(..)
+  , TextureFilter(..)
+  , TextureWrap(..)
   , makeShader
   , makeProgram
   , makeBuffer
   , makeVertexArrayObject
+  , makeTexture
   , findUniformLocation
   ) where
 
@@ -12,8 +15,9 @@ import Prelude
 import Control.Monad.Except (ExceptT, except)
 import Data.Either (Either(..), note)
 import Data.Maybe (fromMaybe)
-import Data.Nullable (toMaybe)
+import Data.Nullable (notNull, toMaybe)
 import Effect.Class (class MonadEffect, liftEffect)
+import Primitives as Primitives
 import Unsafe.Coerce (unsafeCoerce)
 import WebGL2.Raw as Raw
 
@@ -94,3 +98,39 @@ findUniformLocation
 findUniformLocation gl program name = do
   nullableLocation <- liftEffect $ Raw.getUniformLocation gl program name
   except $ note ("Uniform location not found: " <> name) (toMaybe nullableLocation)
+
+
+data TextureFilter = Nearest | Linear
+
+toRawFilter :: TextureFilter -> Int
+toRawFilter Nearest = Raw.nearest
+toRawFilter Linear = Raw.linear
+
+
+data TextureWrap = Repeat | ClampToEdge
+
+toRawWrap :: TextureWrap -> Int
+toRawWrap Repeat = Raw.repeat
+toRawWrap ClampToEdge = Raw.clampToEdge
+
+
+makeTexture
+  :: forall m. MonadEffect m
+  => Raw.RenderingContext
+  -> { width :: Int, height :: Int }
+  -> { min :: TextureFilter, mag :: TextureFilter }
+  -> { s :: TextureWrap, t :: TextureWrap }
+  -> Primitives.Uint8Array
+  -> ExceptT String m Raw.Texture
+makeTexture gl { width, height } filter wrap pixels = do
+  nullableTexture <- liftEffect $ Raw.createTexture gl
+  texture <- except $ note "Texture could not be created" (toMaybe nullableTexture)
+  liftEffect do
+    Raw.bindTexture gl Raw.texture2D (notNull texture)
+    Raw.texImage2D gl Raw.texture2D 0 Raw.rgba8 width height 0 Raw.rgba Raw.unsignedByte
+                   (Primitives.u8AsArrayBufferView pixels)
+    Raw.texParameteri gl Raw.texture2D Raw.textureMinFilter (toRawFilter filter.min)
+    Raw.texParameteri gl Raw.texture2D Raw.textureMagFilter (toRawFilter filter.mag)
+    Raw.texParameteri gl Raw.texture2D Raw.textureWrapS (toRawWrap wrap.s)
+    Raw.texParameteri gl Raw.texture2D Raw.textureWrapT (toRawWrap wrap.t)
+  pure texture

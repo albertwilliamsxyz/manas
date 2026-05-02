@@ -91,7 +91,7 @@ elementArrayBuffer = 0x8893
 foreign import createBuffer
     :: RenderingContext -> Effect (Nullable Buffer)
 foreign import bindBuffer
-    :: RenderingContext -> Int -> Buffer -> Effect Unit
+    :: RenderingContext -> Int -> Nullable Buffer -> Effect Unit
 foreign import bufferData
     :: RenderingContext -> Int -> ArrayBufferView -> Int -> Effect Unit
 foreign import bufferSubData
@@ -114,6 +114,54 @@ depthTest :: Int
 depthTest = 0x0B71
 
 foreign import enable :: RenderingContext -> Int -> Effect Unit
+
+foreign import data Texture :: Type
+
+texture2D :: Int
+texture2D = 0x0DE1
+texture0 :: Int
+texture0 = 0x84C0
+
+textureMagFilter :: Int
+textureMagFilter = 0x2800
+textureMinFilter :: Int
+textureMinFilter = 0x2801
+textureWrapS :: Int
+textureWrapS = 0x2802
+textureWrapT :: Int
+textureWrapT = 0x2803
+
+nearest :: Int
+nearest = 0x2600
+linear :: Int
+linear = 0x2601
+linearMipmapLinear :: Int
+linearMipmapLinear = 0x2703
+
+repeat :: Int
+repeat = 0x2901
+clampToEdge :: Int
+clampToEdge = 0x812F
+
+rgba :: Int
+rgba = 0x1908
+rgba8 :: Int
+rgba8 = 0x8058
+unsignedByte :: Int
+unsignedByte = 0x1401
+
+foreign import createTexture
+    :: RenderingContext -> Effect (Nullable Texture)
+foreign import bindTexture
+    :: RenderingContext -> Int -> Nullable Texture -> Effect Unit
+foreign import texImage2D
+    :: RenderingContext -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> ArrayBufferView -> Effect Unit
+foreign import texParameteri
+    :: RenderingContext -> Int -> Int -> Int -> Effect Unit
+foreign import generateMipmap
+    :: RenderingContext -> Int -> Effect Unit
+foreign import activeTexture
+    :: RenderingContext -> Int -> Effect Unit
 
 foreign import data Framebuffer :: Type
 
@@ -143,7 +191,7 @@ lines :: Int
 lines = 0x0001
 
 triangles :: Int
-triangles = 0x0002
+triangles = 0x0004
 
 unsignedShort :: Int
 unsignedShort = 0x1403

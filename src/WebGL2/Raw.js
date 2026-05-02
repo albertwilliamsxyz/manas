@@ -44,3 +44,10 @@ export const viewport = (gl) => (x) => (y) => (w) => (h) => () => gl.viewport(x,
 export const drawArrays = (gl) => (mode) => (first) => (count) => () => gl.drawArrays(mode, first, count);
 
 export const drawElements = (gl) => (mode) => (count) => (type) => (offset) => () => gl.drawElements(mode, count, type, offset);
+
+export const createTexture = (gl) => () => gl.createTexture();
+export const bindTexture = (gl) => (target) => (texture) => () => gl.bindTexture(target, texture);
+export const texImage2D = (gl) => (target) => (level) => (internalFormat) => (width) => (height) => (border) => (format) => (type) => (data) => () => gl.texImage2D(target, level, internalFormat, width, height, border, format, type, data);
+export const texParameteri = (gl) => (target) => (pname) => (param) => () => gl.texParameteri(target, pname, param);
+export const generateMipmap = (gl) => (target) => () => gl.generateMipmap(target);
+export const activeTexture = (gl) => (texture) => () => gl.activeTexture(texture);
