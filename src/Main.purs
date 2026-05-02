@@ -104,31 +104,67 @@ pinchThreshold = 0.02
 
 cubeVertices :: Array Number
 cubeVertices =
-    [ -0.1, -0.1,  0.1   -- 0: front bottom left
-    ,  0.1, -0.1,  0.1   -- 1: front bottom right
-    ,  0.1,  0.1,  0.1   -- 2: front top right
-    , -0.1,  0.1,  0.1   -- 3: front top left
-    , -0.1, -0.1, -0.1   -- 4: back bottom left
-    ,  0.1, -0.1, -0.1   -- 5: back bottom right
-    ,  0.1,  0.1, -0.1   -- 6: back top right
-    , -0.1,  0.1, -0.1   -- 7: back top left
+    -- Front face (z = +0.1), looking from +Z
+    [ -0.1, -0.1,  0.1   -- 0
+    ,  0.1, -0.1,  0.1   -- 1
+    ,  0.1,  0.1,  0.1   -- 2
+    , -0.1,  0.1,  0.1   -- 3
+    -- Back face (z = -0.1), looking from -Z
+    ,  0.1, -0.1, -0.1   -- 4
+    , -0.1, -0.1, -0.1   -- 5
+    , -0.1,  0.1, -0.1   -- 6
+    ,  0.1,  0.1, -0.1   -- 7
+    -- Right face (x = +0.1), looking from +X
+    ,  0.1, -0.1,  0.1   -- 8
+    ,  0.1, -0.1, -0.1   -- 9
+    ,  0.1,  0.1, -0.1   -- 10
+    ,  0.1,  0.1,  0.1   -- 11
+    -- Left face (x = -0.1), looking from -X
+    , -0.1, -0.1, -0.1   -- 12
+    , -0.1, -0.1,  0.1   -- 13
+    , -0.1,  0.1,  0.1   -- 14
+    , -0.1,  0.1, -0.1   -- 15
+    -- Top face (y = +0.1), looking from +Y
+    , -0.1,  0.1,  0.1   -- 16
+    ,  0.1,  0.1,  0.1   -- 17
+    ,  0.1,  0.1, -0.1   -- 18
+    , -0.1,  0.1, -0.1   -- 19
+    -- Bottom face (y = -0.1), looking from -Y
+    , -0.1, -0.1, -0.1   -- 20
+    ,  0.1, -0.1, -0.1   -- 21
+    ,  0.1, -0.1,  0.1   -- 22
+    , -0.1, -0.1,  0.1   -- 23
+    ]
+
+cubeUVs :: Array Number
+cubeUVs =
+    -- Each face: bottomLeft (0,0), bottomRight (1,0), topRight (1,1), topLeft (0,1)
+    [ 0.0, 0.0,  1.0, 0.0,  1.0, 1.0,  0.0, 1.0   -- front
+    , 0.0, 0.0,  1.0, 0.0,  1.0, 1.0,  0.0, 1.0   -- back
+    , 0.0, 0.0,  1.0, 0.0,  1.0, 1.0,  0.0, 1.0   -- right
+    , 0.0, 0.0,  1.0, 0.0,  1.0, 1.0,  0.0, 1.0   -- left
+    , 0.0, 0.0,  1.0, 0.0,  1.0, 1.0,  0.0, 1.0   -- top
+    , 0.0, 0.0,  1.0, 0.0,  1.0, 1.0,  0.0, 1.0   -- bottom
     ]
 
 cubeEdgeIndices :: Array Int
 cubeEdgeIndices =
-    [ 0, 1, 1, 2, 2, 3, 3, 0   -- front face edges
-    , 4, 5, 5, 6, 6, 7, 7, 4   -- back face edges
-    , 0, 4, 1, 5, 2, 6, 3, 7   -- connecting edges
+    [  0,  1,   1,  2,    2,  3,    3,  0   -- front
+    ,  4,  5,   5,  6,    6,  7,    7,  4   -- back
+    ,  8,  9,   9, 10,   10, 11,   11,  8   -- right
+    , 12, 13,  13, 14,   14, 15,   15, 12   -- left
+    , 16, 17,  17, 18,   18, 19,   19, 16   -- top
+    , 20, 21,  21, 22,   22, 23,   23, 20   -- bottom
     ]
 
 cubeTriangleIndices :: Array Int
 cubeTriangleIndices =
-    [ 0, 1, 2, 0, 2, 3   -- front
-    , 5, 4, 7, 5, 7, 6   -- back
-    , 1, 5, 6, 1, 6, 2   -- right
-    , 4, 0, 3, 4, 3, 7   -- left
-    , 3, 2, 6, 3, 6, 7   -- top
-    , 4, 5, 1, 4, 1, 0   -- bottom
+    [  0,  1,  2,    0,  2,  3   -- front
+    ,  4,  5,  6,    4,  6,  7   -- back
+    ,  8,  9, 10,    8, 10, 11   -- right
+    , 12, 13, 14,   12, 14, 15   -- left
+    , 16, 17, 18,   16, 18, 19   -- top
+    , 20, 21, 22,   20, 22, 23   -- bottom
     ]
 
 -- [Vec3 Conversion]
@@ -149,11 +185,14 @@ glslVersionDirective = "#version 300 es"
 vertexShaderSourceCode :: String
 vertexShaderSourceCode = glslVersionDirective <> """
 in vec3 a_position;
+in vec2 a_uv;
 uniform mat4 u_projection;
 uniform mat4 u_view;
 uniform mat4 u_model;
+out vec2 v_uv;
 void main() {
   gl_Position = u_projection * u_view * u_model * vec4(a_position, 1.0);
+  v_uv = a_uv;
   gl_PointSize = 10.0;
 }
 """
@@ -161,10 +200,16 @@ void main() {
 fragmentShaderSourceCode :: String
 fragmentShaderSourceCode = glslVersionDirective <> """
 precision highp float;
+in vec2 v_uv;
 out vec4 outColor;
 uniform vec4 u_color;
+uniform bool u_useUV;
 void main() {
-  outColor = u_color;
+  if (u_useUV) {
+    outColor = vec4(v_uv, 0.0, 1.0);
+  } else {
+    outColor = u_color;
+  }
 }
 """
 
@@ -182,6 +227,7 @@ derive instance ordGeometryId :: Ord GeometryId
 
 type Geometry =
     { vertices :: Array Number
+    , uvs :: Array Number
     , edgeIndices :: Array Int
     , triangleIndices :: Array Int
     , topology :: Topology
@@ -198,6 +244,7 @@ type Transform =
 type GPUHandle =
     { vao :: WebGL2.VertexArrayObject
     , vertexBuffer :: WebGL2.Buffer
+    , uvBuffer :: WebGL2.Buffer
     , indexBuffer :: WebGL2.Buffer
     , drawMode :: Int
     , vertexCount :: Int
@@ -355,25 +402,31 @@ addCubeToScene position worldState = worldState
                 }
             }
 
-uploadGeometry :: forall m. MonadEffect m => WebGL2.RenderingContext -> Int -> Geometry -> ExceptT String m GPUHandle
-uploadGeometry webGL2Context positionLocation geometry = do
+uploadGeometry :: forall m. MonadEffect m => WebGL2.RenderingContext -> { positionLocation :: Int, uvLocation :: Int } -> Geometry -> ExceptT String m GPUHandle
+uploadGeometry webGL2Context locations geometry = do
     let indices = case geometry.topology of
             Points -> []
             Lines -> geometry.edgeIndices
             Triangles -> geometry.triangleIndices
     vao <- makeVertexArrayObject webGL2Context
     vertexBuffer <- makeBuffer webGL2Context
+    uvBuffer <- makeBuffer webGL2Context
     indexBuffer <- makeBuffer webGL2Context
     liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull vao)
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer (notNull vertexBuffer)
     liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (Primitives.f32AsArrayBufferView (Primitives.float32Array geometry.vertices)) WebGL2.staticDraw
+    liftEffect $ WebGL2.vertexAttribPointer webGL2Context locations.positionLocation baseNumberOfDimensions WebGL2.float false 0 0
+    liftEffect $ WebGL2.enableVertexAttribArray webGL2Context locations.positionLocation
+    liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer (notNull uvBuffer)
+    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (Primitives.f32AsArrayBufferView (Primitives.float32Array geometry.uvs)) WebGL2.staticDraw
+    liftEffect $ WebGL2.vertexAttribPointer webGL2Context locations.uvLocation 2 WebGL2.float false 0 0
+    liftEffect $ WebGL2.enableVertexAttribArray webGL2Context locations.uvLocation
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer (notNull indexBuffer)
     liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (Primitives.u16AsArrayBufferView (Primitives.uint16Array indices)) WebGL2.staticDraw
-    liftEffect $ WebGL2.vertexAttribPointer webGL2Context positionLocation baseNumberOfDimensions WebGL2.float false 0 0
-    liftEffect $ WebGL2.enableVertexAttribArray webGL2Context positionLocation
     liftEffect $ WebGL2.bindVertexArray webGL2Context null
     pure { vao
          , vertexBuffer
+         , uvBuffer
          , indexBuffer
          , drawMode: topologyToDrawMode geometry.topology
          , vertexCount: length indices
@@ -562,6 +615,9 @@ main = launchAff_ do
         positionLocation <- liftEffect $ WebGL2.getAttribLocation webGL2Context program "a_position"
         when (positionLocation == -1) $ except $ Left "Unable to get the location of the position attribute"
 
+        uvLocation <- liftEffect $ WebGL2.getAttribLocation webGL2Context program "a_uv"
+        when (uvLocation == -1) $ except $ Left "Unable to get the location of the uv attribute"
+
         projectionLocation <- findUniformLocation webGL2Context program "u_projection"
         liftEffect $ WebGL2.uniformMatrix4fv webGL2Context projectionLocation false (Math.Mat4.toFloat32Array Math.Mat4.identity)
 
@@ -574,15 +630,19 @@ main = launchAff_ do
         colorLocation <- findUniformLocation webGL2Context program "u_color"
         liftEffect $ WebGL2.uniform4fv webGL2Context colorLocation (Primitives.float32Array [0.0, 0.8, 0.0, 1.0])
 
+        useUVLocation <- findUniformLocation webGL2Context program "u_useUV"
+        liftEffect $ WebGL2.uniform1i webGL2Context useUVLocation 0
+
         let cubeGeometryId = GeometryId "cube"
             cubeGeometry =
                 { vertices: cubeVertices
+                , uvs: cubeUVs
                 , edgeIndices: cubeEdgeIndices
                 , triangleIndices: cubeTriangleIndices
                 , topology: Triangles
                 }
 
-        cubeGPUHandle <- uploadGeometry webGL2Context positionLocation cubeGeometry
+        cubeGPUHandle <- uploadGeometry webGL2Context { positionLocation, uvLocation } cubeGeometry
 
         cubePosition <- liftEffect $ generateRandomTranslation
         let cubeSceneObjectId = SceneObjectId "cube-instance-1"
@@ -783,7 +843,9 @@ main = launchAff_ do
                                   liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context viewLocation false viewMatrix
                                   liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false identityFloat32Array
 
-                                  -- [Rendering]
+                                  -- [Rendering hands and skeleton with uniform color]
+                                  liftEffect $ WebGL2.uniform1i xrWebGL2Context useUVLocation 0
+
                                   liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull leftHandVAO)
                                   liftEffect $ WebGL2.drawArrays xrWebGL2Context WebGL2.points 0 numberOfJointsPerHand
 
@@ -795,6 +857,9 @@ main = launchAff_ do
 
                                   liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull rightHandSkeletonVAO)
                                   liftEffect $ WebGL2.drawElements xrWebGL2Context WebGL2.lines skeletonIndexCount WebGL2.unsignedShort 0
+
+                                  -- [Rendering scene objects with UV-as-color debug]
+                                  liftEffect $ WebGL2.uniform1i xrWebGL2Context useUVLocation 1
 
                                   for_ drawables \drawable -> do
                                       liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false drawable.modelMatrix

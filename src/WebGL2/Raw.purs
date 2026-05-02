@@ -71,6 +71,8 @@ foreign import uniformMatrix4fv
     :: RenderingContext -> UniformLocation -> Boolean -> Float32Array -> Effect Unit
 foreign import uniform4fv
     :: RenderingContext -> UniformLocation -> Float32Array -> Effect Unit
+foreign import uniform1i
+    :: RenderingContext -> UniformLocation -> Int -> Effect Unit
 
 
 foreign import data VertexArrayObject :: Type
