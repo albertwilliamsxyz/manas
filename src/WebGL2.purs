@@ -118,8 +118,8 @@ makeTexture
   :: forall m. MonadEffect m
   => Raw.RenderingContext
   -> { width :: Int, height :: Int }
-  -> { min :: TextureFilter, mag :: TextureFilter }
-  -> { s :: TextureWrap, t :: TextureWrap }
+  -> { minification :: TextureFilter, magnification :: TextureFilter }
+  -> { horizontal :: TextureWrap, vertical :: TextureWrap }
   -> Primitives.Uint8Array
   -> ExceptT String m Raw.Texture
 makeTexture gl { width, height } filter wrap pixels = do
@@ -129,8 +129,8 @@ makeTexture gl { width, height } filter wrap pixels = do
     Raw.bindTexture gl Raw.texture2D (notNull texture)
     Raw.texImage2D gl Raw.texture2D 0 Raw.rgba8 width height 0 Raw.rgba Raw.unsignedByte
                    (Primitives.u8AsArrayBufferView pixels)
-    Raw.texParameteri gl Raw.texture2D Raw.textureMinFilter (toRawFilter filter.min)
-    Raw.texParameteri gl Raw.texture2D Raw.textureMagFilter (toRawFilter filter.mag)
-    Raw.texParameteri gl Raw.texture2D Raw.textureWrapS (toRawWrap wrap.s)
-    Raw.texParameteri gl Raw.texture2D Raw.textureWrapT (toRawWrap wrap.t)
+    Raw.texParameteri gl Raw.texture2D Raw.textureMinFilter (toRawFilter filter.minification)
+    Raw.texParameteri gl Raw.texture2D Raw.textureMagFilter (toRawFilter filter.magnification)
+    Raw.texParameteri gl Raw.texture2D Raw.textureWrapS (toRawWrap wrap.horizontal)
+    Raw.texParameteri gl Raw.texture2D Raw.textureWrapT (toRawWrap wrap.vertical)
   pure texture

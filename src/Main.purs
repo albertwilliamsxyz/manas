@@ -37,7 +37,7 @@ import Web.HTML.HTMLCanvasElement as HTMLCanvasElement
 import Web.HTML.HTMLDocument as HTMLDocument
 import Web.HTML.HTMLElement as HTMLElement
 import Web.HTML.Window (document, navigator)
-import WebGL2 (ShaderType(..), makeShader, makeProgram, makeBuffer, makeVertexArrayObject, findUniformLocation)
+import WebGL2 (ShaderType(..), TextureFilter(..), TextureWrap(..), makeShader, makeProgram, makeBuffer, makeVertexArrayObject, makeTexture, findUniformLocation)
 import WebGL2.Raw as WebGL2
 import WebXR (makeXRWebGL2Compatible, isWebXRSessionModeSupported, requestSession, requestReferenceSpace)
 import WebXR.Raw as WebXR
@@ -204,9 +204,10 @@ in vec2 v_uv;
 out vec4 outColor;
 uniform vec4 u_color;
 uniform bool u_useUV;
+uniform sampler2D u_texture;
 void main() {
   if (u_useUV) {
-    outColor = vec4(v_uv, 0.0, 1.0);
+    outColor = texture(u_texture, v_uv);
   } else {
     outColor = u_color;
   }
@@ -633,6 +634,22 @@ main = launchAff_ do
         useUVLocation <- findUniformLocation webGL2Context program "u_useUV"
         liftEffect $ WebGL2.uniform1i webGL2Context useUVLocation 0
 
+        textureLocation <- findUniformLocation webGL2Context program "u_texture"
+        liftEffect $ WebGL2.uniform1i webGL2Context textureLocation 0
+
+        let checkerPixels = Primitives.uint8Array
+                [ 255,   0,   0, 255
+                , 255, 255, 255, 255
+                , 255, 255, 255, 255
+                , 255,   0,   0, 255
+                ]
+        checkerTexture <- makeTexture
+            webGL2Context
+            { width: 2, height: 2 }
+            { minification: Nearest, magnification: Nearest }
+            { horizontal: Repeat, vertical: Repeat }
+            checkerPixels
+
         let cubeGeometryId = GeometryId "cube"
             cubeGeometry =
                 { vertices: cubeVertices
@@ -858,8 +875,10 @@ main = launchAff_ do
                                   liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull rightHandSkeletonVAO)
                                   liftEffect $ WebGL2.drawElements xrWebGL2Context WebGL2.lines skeletonIndexCount WebGL2.unsignedShort 0
 
-                                  -- [Rendering scene objects with UV-as-color debug]
+                                  -- [Rendering scene objects with checker texture]
                                   liftEffect $ WebGL2.uniform1i xrWebGL2Context useUVLocation 1
+                                  liftEffect $ WebGL2.activeTexture xrWebGL2Context WebGL2.texture0
+                                  liftEffect $ WebGL2.bindTexture xrWebGL2Context WebGL2.texture2D (notNull checkerTexture)
 
                                   for_ drawables \drawable -> do
                                       liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false drawable.modelMatrix
