@@ -6,6 +6,7 @@ import Data.Nullable (Nullable)
 import Effect (Effect)
 import Primitives (ArrayBufferView, Float32Array)
 import Web.HTML.HTMLCanvasElement (HTMLCanvasElement)
+import Web.HTML.HTMLImageElement (HTMLImageElement)
 
 
 foreign import data RenderingContext :: Type
@@ -162,6 +163,8 @@ foreign import bindTexture
     :: RenderingContext -> Int -> Nullable Texture -> Effect Unit
 foreign import texImage2D
     :: RenderingContext -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> ArrayBufferView -> Effect Unit
+foreign import texImage2DFromImage
+    :: RenderingContext -> Int -> Int -> Int -> Int -> Int -> HTMLImageElement -> Effect Unit
 foreign import texParameteri
     :: RenderingContext -> Int -> Int -> Int -> Effect Unit
 foreign import generateMipmap
@@ -172,6 +175,18 @@ foreign import activeTexture
 foreign import data Framebuffer :: Type
 
 foreign import bindFramebuffer :: RenderingContext -> Int -> Nullable Framebuffer -> Effect Unit
+foreign import createFramebuffer
+    :: RenderingContext -> Effect (Nullable Framebuffer)
+foreign import framebufferTexture2D
+    :: RenderingContext -> Int -> Int -> Int -> Nullable Texture -> Int -> Effect Unit
+foreign import checkFramebufferStatus
+    :: RenderingContext -> Int -> Effect Int
+
+colorAttachment0 :: Int
+colorAttachment0 = 0x8CE0
+
+framebufferComplete :: Int
+framebufferComplete = 0x8CD5
 
 foreign import clearColor :: RenderingContext -> Number -> Number -> Number -> Number -> Effect Unit
 foreign import clear :: RenderingContext -> Int -> Effect Unit

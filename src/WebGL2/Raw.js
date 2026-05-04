@@ -38,6 +38,10 @@ export const bufferSubData = (gl) => (target) => (offset) => (data) => () => gl.
 
 export const bindFramebuffer = (gl) => (target) => (framebuffer) => () => gl.bindFramebuffer(target, framebuffer);
 
+export const createFramebuffer = (gl) => () => gl.createFramebuffer();
+export const framebufferTexture2D = (gl) => (target) => (attachment) => (textarget) => (texture) => (level) => () => gl.framebufferTexture2D(target, attachment, textarget, texture, level);
+export const checkFramebufferStatus = (gl) => (target) => () => gl.checkFramebufferStatus(target);
+
 export const clearColor = (gl) => (r) => (g) => (b) => (a) => () => gl.clearColor(r, g, b, a);
 
 export const clear = (gl) => (mask) => () => gl.clear(mask);
@@ -51,6 +55,7 @@ export const drawElements = (gl) => (mode) => (count) => (type) => (offset) => (
 export const createTexture = (gl) => () => gl.createTexture();
 export const bindTexture = (gl) => (target) => (texture) => () => gl.bindTexture(target, texture);
 export const texImage2D = (gl) => (target) => (level) => (internalFormat) => (width) => (height) => (border) => (format) => (type) => (data) => () => gl.texImage2D(target, level, internalFormat, width, height, border, format, type, data);
+export const texImage2DFromImage = (gl) => (target) => (level) => (internalFormat) => (format) => (type) => (image) => () => gl.texImage2D(target, level, internalFormat, format, type, image);
 export const texParameteri = (gl) => (target) => (pname) => (param) => () => gl.texParameteri(target, pname, param);
 export const generateMipmap = (gl) => (target) => () => gl.generateMipmap(target);
 export const activeTexture = (gl) => (texture) => () => gl.activeTexture(texture);

@@ -7,6 +7,8 @@ module WebGL2
   , makeBuffer
   , makeVertexArrayObject
   , makeTexture
+  , makeTextureFromImage
+  , makeFramebuffer
   , findUniformLocation
   ) where
 
@@ -15,10 +17,11 @@ import Prelude
 import Control.Monad.Except (ExceptT, except)
 import Data.Either (Either(..), note)
 import Data.Maybe (fromMaybe)
-import Data.Nullable (notNull, toMaybe)
+import Data.Nullable (notNull, null, toMaybe)
 import Effect.Class (class MonadEffect, liftEffect)
 import Primitives as Primitives
 import Unsafe.Coerce (unsafeCoerce)
+import Web.HTML.HTMLImageElement (HTMLImageElement)
 import WebGL2.Raw as Raw
 
 
@@ -134,3 +137,41 @@ makeTexture gl { width, height } filter wrap pixels = do
     Raw.texParameteri gl Raw.texture2D Raw.textureWrapS (toRawWrap wrap.horizontal)
     Raw.texParameteri gl Raw.texture2D Raw.textureWrapT (toRawWrap wrap.vertical)
   pure texture
+
+
+makeTextureFromImage
+  :: forall m. MonadEffect m
+  => Raw.RenderingContext
+  -> HTMLImageElement
+  -> { minification :: TextureFilter, magnification :: TextureFilter }
+  -> { horizontal :: TextureWrap, vertical :: TextureWrap }
+  -> ExceptT String m Raw.Texture
+makeTextureFromImage gl image filter wrap = do
+  nullableTexture <- liftEffect $ Raw.createTexture gl
+  texture <- except $ note "Texture could not be created" (toMaybe nullableTexture)
+  liftEffect do
+    Raw.bindTexture gl Raw.texture2D (notNull texture)
+    Raw.texImage2DFromImage gl Raw.texture2D 0 Raw.rgba Raw.rgba Raw.unsignedByte image
+    Raw.texParameteri gl Raw.texture2D Raw.textureMinFilter (toRawFilter filter.minification)
+    Raw.texParameteri gl Raw.texture2D Raw.textureMagFilter (toRawFilter filter.magnification)
+    Raw.texParameteri gl Raw.texture2D Raw.textureWrapS (toRawWrap wrap.horizontal)
+    Raw.texParameteri gl Raw.texture2D Raw.textureWrapT (toRawWrap wrap.vertical)
+  pure texture
+
+
+makeFramebuffer
+  :: forall m. MonadEffect m
+  => Raw.RenderingContext
+  -> Raw.Texture
+  -> ExceptT String m Raw.Framebuffer
+makeFramebuffer gl texture = do
+  nullableFramebuffer <- liftEffect $ Raw.createFramebuffer gl
+  framebuffer <- except $ note "Framebuffer could not be created" (toMaybe nullableFramebuffer)
+  liftEffect do
+    Raw.bindFramebuffer gl Raw.framebuffer (notNull framebuffer)
+    Raw.framebufferTexture2D gl Raw.framebuffer Raw.colorAttachment0 Raw.texture2D (notNull texture) 0
+  status <- liftEffect $ Raw.checkFramebufferStatus gl Raw.framebuffer
+  liftEffect $ Raw.bindFramebuffer gl Raw.framebuffer null
+  if status == Raw.framebufferComplete
+    then pure framebuffer
+    else except $ Left ("Framebuffer incomplete: " <> show status)
