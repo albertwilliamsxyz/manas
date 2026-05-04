@@ -120,7 +120,17 @@ float = 0x1406
 depthTest :: Int
 depthTest = 0x0B71
 
+blend :: Int
+blend = 0x0BE2
+
+srcAlpha :: Int
+srcAlpha = 0x0302
+
+oneMinusSrcAlpha :: Int
+oneMinusSrcAlpha = 0x0303
+
 foreign import enable :: RenderingContext -> Int -> Effect Unit
+foreign import blendFunc :: RenderingContext -> Int -> Int -> Effect Unit
 
 foreign import data Texture :: Type
 

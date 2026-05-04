@@ -27,6 +27,8 @@ import Math.Mat4 as Math.Mat4
 import Math.Vec3 (Vec3)
 import Math.Vec3 as Math.Vec3
 import Primitives as Primitives
+import Text.Atlas (loadAtlas)
+import Text.Layout (layoutText)
 import Web.DOM.Element as Element
 import Web.DOM.NonElementParentNode (getElementById)
 import Web.Event.Event (EventType(..))
@@ -247,11 +249,31 @@ out vec4 outColor;
 uniform vec4 u_color;
 uniform bool u_useUV;
 uniform bool u_isEmissive;
+uniform bool u_isText;
 uniform sampler2D u_texture;
 uniform vec3 u_lightPosition;
 uniform float u_lightFalloff;
+uniform float u_pxRange;
+
+float median(float r, float g, float b) {
+  return max(min(r, g), min(max(r, g), b));
+}
+
+float screenPxRange() {
+  vec2 unitRange = vec2(u_pxRange) / vec2(textureSize(u_texture, 0));
+  vec2 screenTexSize = vec2(1.0) / fwidth(v_uv);
+  return max(0.5 * dot(unitRange, screenTexSize), 1.0);
+}
+
 void main() {
-  if (u_useUV) {
+  if (u_isText) {
+    vec3 msd = texture(u_texture, v_uv).rgb;
+    float sd = median(msd.r, msd.g, msd.b);
+    float screenPxDistance = screenPxRange() * (sd - 0.5);
+    float alpha = clamp(screenPxDistance + 0.5, 0.0, 1.0);
+    if (alpha < 0.01) discard;
+    outColor = vec4(0.0, 0.0, 0.0, alpha);
+  } else if (u_useUV) {
     vec4 baseColor = texture(u_texture, v_uv);
     if (u_isEmissive) {
       outColor = baseColor;
@@ -378,6 +400,7 @@ type SceneObject =
     { geometryId :: GeometryId
     , transform :: Transform
     , emission :: Maybe { falloff :: Number }
+    , isText :: Boolean
     }
 
 -- [World State type]
@@ -458,6 +481,25 @@ addCubeToScene position worldState = worldState
                 , scale: Math.Mat4.identity
                 }
             , emission: Nothing
+            , isText: false
+            }
+
+addTextLabelToScene :: Mat4 -> WorldState -> WorldState
+addTextLabelToScene position worldState = worldState
+    { sceneObjects = Map.insert newId newObject worldState.sceneObjects
+    , nextObjectId = worldState.nextObjectId + 1
+    }
+    where
+        newId = SceneObjectId ("text-" <> show worldState.nextObjectId)
+        newObject =
+            { geometryId: GeometryId "text-1"
+            , transform:
+                { translation: position
+                , rotation: Math.Mat4.identity
+                , scale: Math.Mat4.identity
+                }
+            , emission: Nothing
+            , isText: true
             }
 
 uploadGeometry :: forall m. MonadEffect m => WebGL2.RenderingContext -> { positionLocation :: Int, normalLocation :: Int, uvLocation :: Int } -> Geometry -> ExceptT String m GPUHandle
@@ -676,6 +718,8 @@ main = launchAff_ do
         program <- makeProgram webGL2Context { vertex: vertexShader, fragment: fragmentShader }
         liftEffect $ WebGL2.useProgram webGL2Context program
         liftEffect $ WebGL2.enable webGL2Context WebGL2.depthTest
+        liftEffect $ WebGL2.enable webGL2Context WebGL2.blend
+        liftEffect $ WebGL2.blendFunc webGL2Context WebGL2.srcAlpha WebGL2.oneMinusSrcAlpha
 
         -- [Getting the WebGL location of shader attributes and uniforms, and setting up initial values]
         positionLocation <- liftEffect $ WebGL2.getAttribLocation webGL2Context program "a_position"
@@ -708,11 +752,16 @@ main = launchAff_ do
         isEmissiveLocation <- findUniformLocation webGL2Context program "u_isEmissive"
         liftEffect $ WebGL2.uniform1i webGL2Context isEmissiveLocation 0
 
+        isTextLocation <- findUniformLocation webGL2Context program "u_isText"
+        liftEffect $ WebGL2.uniform1i webGL2Context isTextLocation 0
+
         lightPositionLocation <- findUniformLocation webGL2Context program "u_lightPosition"
         liftEffect $ WebGL2.uniform3fv webGL2Context lightPositionLocation (Math.Vec3.toFloat32Array Math.Vec3.zero)
 
         lightFalloffLocation <- findUniformLocation webGL2Context program "u_lightFalloff"
         liftEffect $ WebGL2.uniform1f webGL2Context lightFalloffLocation 1.0
+
+        pxRangeLocation <- findUniformLocation webGL2Context program "u_pxRange"
 
         let checkerPixels = Primitives.uint8Array
                 [ 255,   0,   0, 255
@@ -726,6 +775,9 @@ main = launchAff_ do
             { minification: Nearest, magnification: Nearest }
             { horizontal: Repeat, vertical: Repeat }
             checkerPixels
+
+        atlas <- loadAtlas webGL2Context { png: "/assets/atlas.png", json: "/assets/atlas.json" }
+        liftEffect $ WebGL2.uniform1f webGL2Context pxRangeLocation atlas.distanceRange
 
         let cubeGeometryId = GeometryId "cube"
             cubeGeometry =
@@ -749,11 +801,46 @@ main = launchAff_ do
                     , scale: Math.Mat4.identity
                     }
                 , emission: Just { falloff: 1.0 }
+                , isText: false
                 }
 
-        let sceneObjects = Map.singleton cubeSceneObjectId cubeSceneObject
-            geometries = Map.singleton cubeGeometryId cubeGeometry
-            gpuHandles = Map.singleton cubeGeometryId cubeGPUHandle
+        let textLayout = layoutText atlas { content: "Example text", scale: 0.005 }
+            textGeometryId = GeometryId "text-1"
+            textGeometry =
+                { vertices: textLayout.vertices
+                , normals: replicate (length textLayout.vertices) (Math.Vec3.vec3 0.0 0.0 1.0)
+                , uvs: textLayout.uvs
+                , edgeIndices: []
+                , triangleIndices: textLayout.triangleIndices
+                , topology: Triangles
+                }
+
+        textGPUHandle <- uploadGeometry webGL2Context { positionLocation, normalLocation, uvLocation } textGeometry
+
+        let textSceneObjectId = SceneObjectId "text-instance-1"
+            textSceneObject =
+                { geometryId: textGeometryId
+                , transform:
+                    { translation: Math.Mat4.translation (Math.Vec3.vec3 0.0 0.0 (-0.5))
+                    , rotation: Math.Mat4.identity
+                    , scale: Math.Mat4.identity
+                    }
+                , emission: Nothing
+                , isText: true
+                }
+
+        let sceneObjects = Map.fromFoldable
+                [ Tuple cubeSceneObjectId cubeSceneObject
+                , Tuple textSceneObjectId textSceneObject
+                ]
+            geometries = Map.fromFoldable
+                [ Tuple cubeGeometryId cubeGeometry
+                , Tuple textGeometryId textGeometry
+                ]
+            gpuHandles = Map.fromFoldable
+                [ Tuple cubeGeometryId cubeGPUHandle
+                , Tuple textGeometryId textGPUHandle
+                ]
 
         let initialWorldState =
                 { geometries
@@ -905,6 +992,11 @@ main = launchAff_ do
                                 Just spawn -> do
                                     let translationMatrix = Math.Mat4.translation spawn.position
                                     liftEffect $ Ref.modify_ (addCubeToScene translationMatrix) worldStateRef
+                                    roll <- liftEffect random
+                                    when (roll < 0.5) do
+                                        let labelOffset = Math.Vec3.vec3 0.0 0.18 0.0
+                                            labelPosition = Math.Mat4.translation (Math.Vec3.add spawn.position labelOffset)
+                                        liftEffect $ Ref.modify_ (addTextLabelToScene labelPosition) worldStateRef
                                 Nothing -> pure unit
 
                             -- [Managing rendering]
@@ -925,6 +1017,8 @@ main = launchAff_ do
                                         { gpu
                                         , modelMatrix: Math.Mat4.toFloat32Array (composeModelMatrix obj.transform)
                                         , isEmissive: isJust obj.emission
+                                        , isText: obj.isText
+                                        , texture: if obj.isText then atlas.texture else checkerTexture
                                         }
                                     drawables = List.mapMaybe asDrawable (Map.values updatedWorldState.sceneObjects)
 
@@ -968,14 +1062,15 @@ main = launchAff_ do
                                   liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull rightHandSkeletonVAO)
                                   liftEffect $ WebGL2.drawElements xrWebGL2Context WebGL2.lines skeletonIndexCount WebGL2.unsignedShort 0
 
-                                  -- [Rendering scene objects with checker texture]
+                                  -- [Rendering scene objects: cubes via checker, texts via MSDF atlas]
                                   liftEffect $ WebGL2.uniform1i xrWebGL2Context useUVLocation 1
                                   liftEffect $ WebGL2.activeTexture xrWebGL2Context WebGL2.texture0
-                                  liftEffect $ WebGL2.bindTexture xrWebGL2Context WebGL2.texture2D (notNull checkerTexture)
 
                                   for_ drawables \drawable -> do
                                       liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false drawable.modelMatrix
                                       liftEffect $ WebGL2.uniform1i xrWebGL2Context isEmissiveLocation (if drawable.isEmissive then 1 else 0)
+                                      liftEffect $ WebGL2.uniform1i xrWebGL2Context isTextLocation (if drawable.isText then 1 else 0)
+                                      liftEffect $ WebGL2.bindTexture xrWebGL2Context WebGL2.texture2D (notNull drawable.texture)
                                       liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull drawable.gpu.vao)
                                       liftEffect $ WebGL2.drawElements xrWebGL2Context drawable.gpu.drawMode drawable.gpu.vertexCount WebGL2.unsignedShort 0
                         case result of

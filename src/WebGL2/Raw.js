@@ -33,6 +33,7 @@ export const vertexAttribPointer = (gl) => (index) => (size) => (type) => (norma
 export const enableVertexAttribArray = (gl) => (index) => () => gl.enableVertexAttribArray(index);
 
 export const enable = (gl) => (capability) => () => gl.enable(capability);
+export const blendFunc = (gl) => (sfactor) => (dfactor) => () => gl.blendFunc(sfactor, dfactor);
 
 export const bufferSubData = (gl) => (target) => (offset) => (data) => () => gl.bufferSubData(target, offset, data);
 
