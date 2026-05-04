@@ -21,6 +21,8 @@ export const getUniformLocation = (gl) => (program) => (name) => () => gl.getUni
 export const uniformMatrix4fv = (gl) => (location) => (transpose) => (value) => () => gl.uniformMatrix4fv(location, transpose, value);
 export const uniform4fv = (gl) => (location) => (value) => () => gl.uniform4fv(location, value);
 export const uniform1i = (gl) => (location) => (value) => () => gl.uniform1i(location, value);
+export const uniform1f = (gl) => (location) => (value) => () => gl.uniform1f(location, value);
+export const uniform3fv = (gl) => (location) => (value) => () => gl.uniform3fv(location, value);
 
 export const createVertexArray = (gl) => () => gl.createVertexArray();
 export const bindVertexArray = (gl) => (vao) => () => gl.bindVertexArray(vao);

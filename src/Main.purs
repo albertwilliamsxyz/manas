@@ -10,7 +10,7 @@ import Data.Int.Bits ((.|.))
 import Data.List as List
 import Data.Map (Map, fromFoldable)
 import Data.Map as Map
-import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Maybe (Maybe(..), fromMaybe, isJust)
 import Data.Nullable (toMaybe, notNull, null)
 import Data.Number as Number
 import Data.Tuple (Tuple(..), fst)
@@ -136,6 +136,40 @@ cubeVertices =
     , Math.Vec3.vec3 (-0.1) (-0.1)   0.1    -- 23
     ]
 
+cubeNormals :: Array Vec3
+cubeNormals =
+    -- Front face — normal points +Z
+    [ Math.Vec3.vec3 0.0 0.0   1.0     -- 0
+    , Math.Vec3.vec3 0.0 0.0   1.0     -- 1
+    , Math.Vec3.vec3 0.0 0.0   1.0     -- 2
+    , Math.Vec3.vec3 0.0 0.0   1.0     -- 3
+    -- Back face — normal points -Z
+    , Math.Vec3.vec3 0.0 0.0 (-1.0)    -- 4
+    , Math.Vec3.vec3 0.0 0.0 (-1.0)    -- 5
+    , Math.Vec3.vec3 0.0 0.0 (-1.0)    -- 6
+    , Math.Vec3.vec3 0.0 0.0 (-1.0)    -- 7
+    -- Right face — normal points +X
+    , Math.Vec3.vec3 1.0 0.0   0.0     -- 8
+    , Math.Vec3.vec3 1.0 0.0   0.0     -- 9
+    , Math.Vec3.vec3 1.0 0.0   0.0     -- 10
+    , Math.Vec3.vec3 1.0 0.0   0.0     -- 11
+    -- Left face — normal points -X
+    , Math.Vec3.vec3 (-1.0) 0.0 0.0    -- 12
+    , Math.Vec3.vec3 (-1.0) 0.0 0.0    -- 13
+    , Math.Vec3.vec3 (-1.0) 0.0 0.0    -- 14
+    , Math.Vec3.vec3 (-1.0) 0.0 0.0    -- 15
+    -- Top face — normal points +Y
+    , Math.Vec3.vec3 0.0 1.0 0.0       -- 16
+    , Math.Vec3.vec3 0.0 1.0 0.0       -- 17
+    , Math.Vec3.vec3 0.0 1.0 0.0       -- 18
+    , Math.Vec3.vec3 0.0 1.0 0.0       -- 19
+    -- Bottom face — normal points -Y
+    , Math.Vec3.vec3 0.0 (-1.0) 0.0    -- 20
+    , Math.Vec3.vec3 0.0 (-1.0) 0.0    -- 21
+    , Math.Vec3.vec3 0.0 (-1.0) 0.0    -- 22
+    , Math.Vec3.vec3 0.0 (-1.0) 0.0    -- 23
+    ]
+
 cubeUVs :: Array Number
 cubeUVs =
     -- Each face: bottomLeft (0,0), bottomRight (1,0), topRight (1,1), topLeft (0,1)
@@ -185,14 +219,20 @@ glslVersionDirective = "#version 300 es"
 vertexShaderSourceCode :: String
 vertexShaderSourceCode = glslVersionDirective <> """
 in vec3 a_position;
+in vec3 a_normal;
 in vec2 a_uv;
 uniform mat4 u_projection;
 uniform mat4 u_view;
 uniform mat4 u_model;
 out vec2 v_uv;
+out vec3 v_normal;
+out vec3 v_worldPos;
 void main() {
-  gl_Position = u_projection * u_view * u_model * vec4(a_position, 1.0);
+  vec4 worldPosition = u_model * vec4(a_position, 1.0);
+  gl_Position = u_projection * u_view * worldPosition;
   v_uv = a_uv;
+  v_normal = mat3(u_model) * a_normal;
+  v_worldPos = worldPosition.xyz;
   gl_PointSize = 10.0;
 }
 """
@@ -201,13 +241,31 @@ fragmentShaderSourceCode :: String
 fragmentShaderSourceCode = glslVersionDirective <> """
 precision highp float;
 in vec2 v_uv;
+in vec3 v_normal;
+in vec3 v_worldPos;
 out vec4 outColor;
 uniform vec4 u_color;
 uniform bool u_useUV;
+uniform bool u_isEmissive;
 uniform sampler2D u_texture;
+uniform vec3 u_lightPosition;
+uniform float u_lightFalloff;
 void main() {
   if (u_useUV) {
-    outColor = texture(u_texture, v_uv);
+    vec4 baseColor = texture(u_texture, v_uv);
+    if (u_isEmissive) {
+      outColor = baseColor;
+    } else {
+      vec3 normal = normalize(v_normal);
+      vec3 toLight = u_lightPosition - v_worldPos;
+      float distance = length(toLight);
+      vec3 lightDir = toLight / distance;
+      float intensity = max(dot(normal, lightDir), 0.0);
+      float attenuation = 1.0 / (1.0 + u_lightFalloff * distance * distance);
+      float ambient = 0.2;
+      float lighting = ambient + (1.0 - ambient) * intensity * attenuation;
+      outColor = vec4(baseColor.rgb * lighting, baseColor.a);
+    }
   } else {
     outColor = u_color;
   }
@@ -228,6 +286,7 @@ derive instance ordGeometryId :: Ord GeometryId
 
 type Geometry =
     { vertices :: Array Vec3
+    , normals :: Array Vec3
     , uvs :: Array Number
     , edgeIndices :: Array Int
     , triangleIndices :: Array Int
@@ -245,6 +304,7 @@ type Transform =
 type GPUHandle =
     { vao :: WebGL2.VertexArrayObject
     , vertexBuffer :: WebGL2.Buffer
+    , normalBuffer :: WebGL2.Buffer
     , uvBuffer :: WebGL2.Buffer
     , indexBuffer :: WebGL2.Buffer
     , drawMode :: Int
@@ -314,9 +374,10 @@ newtype SceneObjectId = SceneObjectId String
 derive instance eqSceneObjectId :: Eq SceneObjectId
 derive instance ordSceneObjectId :: Ord SceneObjectId
 
-type SceneObject = 
+type SceneObject =
     { geometryId :: GeometryId
     , transform :: Transform
+    , emission :: Maybe { falloff :: Number }
     }
 
 -- [World State type]
@@ -396,9 +457,10 @@ addCubeToScene position worldState = worldState
                 , rotation: Math.Mat4.identity
                 , scale: Math.Mat4.identity
                 }
+            , emission: Nothing
             }
 
-uploadGeometry :: forall m. MonadEffect m => WebGL2.RenderingContext -> { positionLocation :: Int, uvLocation :: Int } -> Geometry -> ExceptT String m GPUHandle
+uploadGeometry :: forall m. MonadEffect m => WebGL2.RenderingContext -> { positionLocation :: Int, normalLocation :: Int, uvLocation :: Int } -> Geometry -> ExceptT String m GPUHandle
 uploadGeometry webGL2Context locations geometry = do
     let indices = case geometry.topology of
             Points -> []
@@ -406,14 +468,20 @@ uploadGeometry webGL2Context locations geometry = do
             Triangles -> geometry.triangleIndices
     vao <- makeVertexArrayObject webGL2Context
     vertexBuffer <- makeBuffer webGL2Context
+    normalBuffer <- makeBuffer webGL2Context
     uvBuffer <- makeBuffer webGL2Context
     indexBuffer <- makeBuffer webGL2Context
     let vertexNumbers = concatMap Math.Vec3.toArray geometry.vertices
+    let normalNumbers = concatMap Math.Vec3.toArray geometry.normals
     liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull vao)
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer (notNull vertexBuffer)
     liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (Primitives.f32AsArrayBufferView (Primitives.float32Array vertexNumbers)) WebGL2.staticDraw
     liftEffect $ WebGL2.vertexAttribPointer webGL2Context locations.positionLocation baseNumberOfDimensions WebGL2.float false 0 0
     liftEffect $ WebGL2.enableVertexAttribArray webGL2Context locations.positionLocation
+    liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer (notNull normalBuffer)
+    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (Primitives.f32AsArrayBufferView (Primitives.float32Array normalNumbers)) WebGL2.staticDraw
+    liftEffect $ WebGL2.vertexAttribPointer webGL2Context locations.normalLocation baseNumberOfDimensions WebGL2.float false 0 0
+    liftEffect $ WebGL2.enableVertexAttribArray webGL2Context locations.normalLocation
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer (notNull uvBuffer)
     liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (Primitives.f32AsArrayBufferView (Primitives.float32Array geometry.uvs)) WebGL2.staticDraw
     liftEffect $ WebGL2.vertexAttribPointer webGL2Context locations.uvLocation 2 WebGL2.float false 0 0
@@ -423,6 +491,7 @@ uploadGeometry webGL2Context locations geometry = do
     liftEffect $ WebGL2.bindVertexArray webGL2Context null
     pure { vao
          , vertexBuffer
+         , normalBuffer
          , uvBuffer
          , indexBuffer
          , drawMode: topologyToDrawMode geometry.topology
@@ -612,6 +681,9 @@ main = launchAff_ do
         positionLocation <- liftEffect $ WebGL2.getAttribLocation webGL2Context program "a_position"
         when (positionLocation == -1) $ except $ Left "Unable to get the location of the position attribute"
 
+        normalLocation <- liftEffect $ WebGL2.getAttribLocation webGL2Context program "a_normal"
+        when (normalLocation == -1) $ except $ Left "Unable to get the location of the normal attribute"
+
         uvLocation <- liftEffect $ WebGL2.getAttribLocation webGL2Context program "a_uv"
         when (uvLocation == -1) $ except $ Left "Unable to get the location of the uv attribute"
 
@@ -633,6 +705,15 @@ main = launchAff_ do
         textureLocation <- findUniformLocation webGL2Context program "u_texture"
         liftEffect $ WebGL2.uniform1i webGL2Context textureLocation 0
 
+        isEmissiveLocation <- findUniformLocation webGL2Context program "u_isEmissive"
+        liftEffect $ WebGL2.uniform1i webGL2Context isEmissiveLocation 0
+
+        lightPositionLocation <- findUniformLocation webGL2Context program "u_lightPosition"
+        liftEffect $ WebGL2.uniform3fv webGL2Context lightPositionLocation (Math.Vec3.toFloat32Array Math.Vec3.zero)
+
+        lightFalloffLocation <- findUniformLocation webGL2Context program "u_lightFalloff"
+        liftEffect $ WebGL2.uniform1f webGL2Context lightFalloffLocation 1.0
+
         let checkerPixels = Primitives.uint8Array
                 [ 255,   0,   0, 255
                 , 255, 255, 255, 255
@@ -649,13 +730,14 @@ main = launchAff_ do
         let cubeGeometryId = GeometryId "cube"
             cubeGeometry =
                 { vertices: cubeVertices
+                , normals: cubeNormals
                 , uvs: cubeUVs
                 , edgeIndices: cubeEdgeIndices
                 , triangleIndices: cubeTriangleIndices
                 , topology: Triangles
                 }
 
-        cubeGPUHandle <- uploadGeometry webGL2Context { positionLocation, uvLocation } cubeGeometry
+        cubeGPUHandle <- uploadGeometry webGL2Context { positionLocation, normalLocation, uvLocation } cubeGeometry
 
         cubePosition <- liftEffect $ generateRandomTranslation
         let cubeSceneObjectId = SceneObjectId "cube-instance-1"
@@ -666,6 +748,7 @@ main = launchAff_ do
                     , rotation: Math.Mat4.identity
                     , scale: Math.Mat4.identity
                     }
+                , emission: Just { falloff: 1.0 }
                 }
 
         let sceneObjects = Map.singleton cubeSceneObjectId cubeSceneObject
@@ -841,8 +924,22 @@ main = launchAff_ do
                                       Just gpu -> Just
                                         { gpu
                                         , modelMatrix: Math.Mat4.toFloat32Array (composeModelMatrix obj.transform)
+                                        , isEmissive: isJust obj.emission
                                         }
                                     drawables = List.mapMaybe asDrawable (Map.values updatedWorldState.sceneObjects)
+
+                                -- [Uploading first emissive scene object as the active light]
+                                let emissiveObjects = List.filter (isJust <<< _.emission) (Map.values updatedWorldState.sceneObjects)
+                                case List.head emissiveObjects of
+                                  Just emissiveObj -> do
+                                      let lightPos = Math.Mat4.translationOf (composeModelMatrix emissiveObj.transform)
+                                          lightFalloff = case emissiveObj.emission of
+                                              Just e -> e.falloff
+                                              Nothing -> 1.0
+                                      liftEffect $ WebGL2.uniform3fv xrWebGL2Context lightPositionLocation (Math.Vec3.toFloat32Array lightPos)
+                                      liftEffect $ WebGL2.uniform1f xrWebGL2Context lightFalloffLocation lightFalloff
+                                  Nothing -> pure unit
+
                                 for_ views \view -> do
                                   -- [Managing rendering for each view (eye)]
                                   nullableViewport <- liftEffect $ WebXR.getViewport xrGLLayer view
@@ -878,6 +975,7 @@ main = launchAff_ do
 
                                   for_ drawables \drawable -> do
                                       liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false drawable.modelMatrix
+                                      liftEffect $ WebGL2.uniform1i xrWebGL2Context isEmissiveLocation (if drawable.isEmissive then 1 else 0)
                                       liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull drawable.gpu.vao)
                                       liftEffect $ WebGL2.drawElements xrWebGL2Context drawable.gpu.drawMode drawable.gpu.vertexCount WebGL2.unsignedShort 0
                         case result of

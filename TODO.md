@@ -202,6 +202,11 @@ Vertex/edge/face → composition. The original AutoCAD/Blender vision in spatial
 - [ ] Review two-hand manipulation math on paper
 - [ ] Map performance optimization (if needed with many objects)
 
+### Backlog from Phase B (lighting on device)
+- [ ] **Shadow casting**: an object between the emitter and another object should occlude light. Today the fragment shader has no occlusion test — light radiates through everything. Approach: shadow mapping — render scene from the emitter's POV into a depth texture, sample in the main shader to test "is this fragment visible from the light?". Substantial (~1-2 sessions).
+- [ ] **Two-hand grab on different objects**: today pinching with both hands on the same object enters TwoHandManipulate (combined translate + rotate + scale). Desired: pinch on object A with one hand and on object B with the other → both move independently in parallel. TwoHandManipulate remains for explicit dual-grip on one object; the default for "different objects" is parallel one-hand each. Refactor of the interaction state machine.
+- [ ] **Multiple light sources**: extend `u_lightPosition` / `u_lightFalloff` from scalars to fixed-size arrays; loop over emissive scene objects in the fragment shader, accumulate contributions. Cap at ~8 lights via `MAX_LIGHTS`. ~1 hour when needed.
+
 ---
 
 ## Reference (not tasks)

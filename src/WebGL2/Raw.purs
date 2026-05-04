@@ -73,6 +73,10 @@ foreign import uniform4fv
     :: RenderingContext -> UniformLocation -> Float32Array -> Effect Unit
 foreign import uniform1i
     :: RenderingContext -> UniformLocation -> Int -> Effect Unit
+foreign import uniform1f
+    :: RenderingContext -> UniformLocation -> Number -> Effect Unit
+foreign import uniform3fv
+    :: RenderingContext -> UniformLocation -> Float32Array -> Effect Unit
 
 
 foreign import data VertexArrayObject :: Type
