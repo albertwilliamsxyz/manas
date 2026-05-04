@@ -3,7 +3,7 @@ module Main where
 import Prelude
 
 import Control.Monad.Except (ExceptT, except, runExceptT)
-import Data.Array (length, replicate, uncons, (!!))
+import Data.Array (concatMap, length, replicate, uncons, (!!))
 import Data.Either (Either(..), note)
 import Data.Foldable (for_)
 import Data.Int.Bits ((.|.))
@@ -102,38 +102,38 @@ pinchThreshold = 0.02
 
 -- [Geometry]
 
-cubeVertices :: Array Number
+cubeVertices :: Array Vec3
 cubeVertices =
     -- Front face (z = +0.1), looking from +Z
-    [ -0.1, -0.1,  0.1   -- 0
-    ,  0.1, -0.1,  0.1   -- 1
-    ,  0.1,  0.1,  0.1   -- 2
-    , -0.1,  0.1,  0.1   -- 3
+    [ Math.Vec3.vec3 (-0.1) (-0.1)   0.1    -- 0
+    , Math.Vec3.vec3   0.1  (-0.1)   0.1    -- 1
+    , Math.Vec3.vec3   0.1    0.1    0.1    -- 2
+    , Math.Vec3.vec3 (-0.1)   0.1    0.1    -- 3
     -- Back face (z = -0.1), looking from -Z
-    ,  0.1, -0.1, -0.1   -- 4
-    , -0.1, -0.1, -0.1   -- 5
-    , -0.1,  0.1, -0.1   -- 6
-    ,  0.1,  0.1, -0.1   -- 7
+    , Math.Vec3.vec3   0.1  (-0.1) (-0.1)   -- 4
+    , Math.Vec3.vec3 (-0.1) (-0.1) (-0.1)   -- 5
+    , Math.Vec3.vec3 (-0.1)   0.1  (-0.1)   -- 6
+    , Math.Vec3.vec3   0.1    0.1  (-0.1)   -- 7
     -- Right face (x = +0.1), looking from +X
-    ,  0.1, -0.1,  0.1   -- 8
-    ,  0.1, -0.1, -0.1   -- 9
-    ,  0.1,  0.1, -0.1   -- 10
-    ,  0.1,  0.1,  0.1   -- 11
+    , Math.Vec3.vec3   0.1  (-0.1)   0.1    -- 8
+    , Math.Vec3.vec3   0.1  (-0.1) (-0.1)   -- 9
+    , Math.Vec3.vec3   0.1    0.1  (-0.1)   -- 10
+    , Math.Vec3.vec3   0.1    0.1    0.1    -- 11
     -- Left face (x = -0.1), looking from -X
-    , -0.1, -0.1, -0.1   -- 12
-    , -0.1, -0.1,  0.1   -- 13
-    , -0.1,  0.1,  0.1   -- 14
-    , -0.1,  0.1, -0.1   -- 15
+    , Math.Vec3.vec3 (-0.1) (-0.1) (-0.1)   -- 12
+    , Math.Vec3.vec3 (-0.1) (-0.1)   0.1    -- 13
+    , Math.Vec3.vec3 (-0.1)   0.1    0.1    -- 14
+    , Math.Vec3.vec3 (-0.1)   0.1  (-0.1)   -- 15
     -- Top face (y = +0.1), looking from +Y
-    , -0.1,  0.1,  0.1   -- 16
-    ,  0.1,  0.1,  0.1   -- 17
-    ,  0.1,  0.1, -0.1   -- 18
-    , -0.1,  0.1, -0.1   -- 19
+    , Math.Vec3.vec3 (-0.1)   0.1    0.1    -- 16
+    , Math.Vec3.vec3   0.1    0.1    0.1    -- 17
+    , Math.Vec3.vec3   0.1    0.1  (-0.1)   -- 18
+    , Math.Vec3.vec3 (-0.1)   0.1  (-0.1)   -- 19
     -- Bottom face (y = -0.1), looking from -Y
-    , -0.1, -0.1, -0.1   -- 20
-    ,  0.1, -0.1, -0.1   -- 21
-    ,  0.1, -0.1,  0.1   -- 22
-    , -0.1, -0.1,  0.1   -- 23
+    , Math.Vec3.vec3 (-0.1) (-0.1) (-0.1)   -- 20
+    , Math.Vec3.vec3   0.1  (-0.1) (-0.1)   -- 21
+    , Math.Vec3.vec3   0.1  (-0.1)   0.1    -- 22
+    , Math.Vec3.vec3 (-0.1) (-0.1)   0.1    -- 23
     ]
 
 cubeUVs :: Array Number
@@ -227,7 +227,7 @@ derive instance eqGeometryId :: Eq GeometryId
 derive instance ordGeometryId :: Ord GeometryId
 
 type Geometry =
-    { vertices :: Array Number
+    { vertices :: Array Vec3
     , uvs :: Array Number
     , edgeIndices :: Array Int
     , triangleIndices :: Array Int
@@ -342,13 +342,8 @@ generateRandomTranslation = do
     tz <- random
     pure $ Math.Mat4.translation (Math.Vec3.vec3 tx ty tz)
 
-getVertex :: Array Number -> Int -> Vec3
-getVertex vertices i =
-    let offset = i * 3
-        x = fromMaybe 0.0 (vertices !! offset)
-        y = fromMaybe 0.0 (vertices !! (offset + 1))
-        z = fromMaybe 0.0 (vertices !! (offset + 2))
-    in Math.Vec3.vec3 x y z
+getVertex :: Array Vec3 -> Int -> Vec3
+getVertex vertices i = fromMaybe Math.Vec3.zero (vertices !! i)
 
 rayMeshIntersect
     :: { origin :: Vec3, direction :: Vec3 }
@@ -413,9 +408,10 @@ uploadGeometry webGL2Context locations geometry = do
     vertexBuffer <- makeBuffer webGL2Context
     uvBuffer <- makeBuffer webGL2Context
     indexBuffer <- makeBuffer webGL2Context
+    let vertexNumbers = concatMap Math.Vec3.toArray geometry.vertices
     liftEffect $ WebGL2.bindVertexArray webGL2Context (notNull vao)
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer (notNull vertexBuffer)
-    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (Primitives.f32AsArrayBufferView (Primitives.float32Array geometry.vertices)) WebGL2.staticDraw
+    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.arrayBuffer (Primitives.f32AsArrayBufferView (Primitives.float32Array vertexNumbers)) WebGL2.staticDraw
     liftEffect $ WebGL2.vertexAttribPointer webGL2Context locations.positionLocation baseNumberOfDimensions WebGL2.float false 0 0
     liftEffect $ WebGL2.enableVertexAttribArray webGL2Context locations.positionLocation
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.arrayBuffer (notNull uvBuffer)

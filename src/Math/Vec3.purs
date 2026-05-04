@@ -12,6 +12,7 @@ module Math.Vec3
   , cross
   , normalize
   , midpoint
+  , toArray
   , toFloat32Array
   , fromFloat32Array
   ) where
@@ -21,6 +22,7 @@ import Prelude hiding (add, sub, zero, negate)
 import Data.Maybe (Maybe(..))
 import Data.Number (sqrt)
 import Primitives (Float32Array, float32Array)
+import Primitives as Primitives
 
 newtype Vec3 = Vec3 Float32Array
 
@@ -69,6 +71,9 @@ normalize v =
 
 midpoint :: Vec3 -> Vec3 -> Vec3
 midpoint a b = scale 0.5 (add a b)
+
+toArray :: Vec3 -> Array Number
+toArray (Vec3 arr) = Primitives.toArray arr
 
 toFloat32Array :: Vec3 -> Float32Array
 toFloat32Array (Vec3 arr) = arr
