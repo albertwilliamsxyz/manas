@@ -1049,6 +1049,7 @@ main = launchAff_ do
 
                                   -- [Rendering hands and skeleton with uniform color]
                                   liftEffect $ WebGL2.uniform1i xrWebGL2Context useUVLocation 0
+                                  liftEffect $ WebGL2.uniform1i xrWebGL2Context isTextLocation 0
 
                                   liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull leftHandVAO)
                                   liftEffect $ WebGL2.drawArrays xrWebGL2Context WebGL2.points 0 numberOfJointsPerHand
