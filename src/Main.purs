@@ -3,14 +3,18 @@ module Main where
 import Prelude
 
 import Control.Monad.Except (ExceptT, except, runExceptT)
-import Data.Array (concatMap, length, replicate, uncons, (!!))
+import Data.Array (concatMap, length, mapWithIndex, replicate, uncons, (!!))
+import Data.Array as Array
+import Data.Traversable (traverse)
 import Data.Either (Either(..), note)
 import Data.Foldable (for_)
 import Data.Int.Bits ((.|.))
 import Data.List as List
 import Data.Map (Map, fromFoldable)
 import Data.Map as Map
-import Data.Maybe (Maybe(..), fromMaybe, isJust)
+import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing)
+import Data.Int (toNumber)
+import Data.String.CodeUnits (toCharArray)
 import Data.Nullable (toMaybe, notNull, null)
 import Data.Number as Number
 import Data.Tuple (Tuple(..), fst)
@@ -27,7 +31,7 @@ import Math.Mat4 as Math.Mat4
 import Math.Vec3 (Vec3)
 import Math.Vec3 as Math.Vec3
 import Primitives as Primitives
-import Text.Atlas (loadAtlas)
+import Text.Atlas (Atlas, loadAtlas)
 import Text.Layout (layoutText)
 import Web.DOM.Element as Element
 import Web.DOM.NonElementParentNode (getElementById)
@@ -242,6 +246,7 @@ void main() {
 fragmentShaderSourceCode :: String
 fragmentShaderSourceCode = glslVersionDirective <> """
 precision highp float;
+const int MAX_LIGHTS = 8;
 in vec2 v_uv;
 in vec3 v_normal;
 in vec3 v_worldPos;
@@ -251,8 +256,9 @@ uniform bool u_useUV;
 uniform bool u_isEmissive;
 uniform bool u_isText;
 uniform sampler2D u_texture;
-uniform vec3 u_lightPosition;
-uniform float u_lightFalloff;
+uniform vec3 u_lightPositions[MAX_LIGHTS];
+uniform float u_lightFalloffs[MAX_LIGHTS];
+uniform int u_numLights;
 uniform float u_pxRange;
 
 float median(float r, float g, float b) {
@@ -272,20 +278,24 @@ void main() {
     float screenPxDistance = screenPxRange() * (sd - 0.5);
     float alpha = clamp(screenPxDistance + 0.5, 0.0, 1.0);
     if (alpha < 0.01) discard;
-    outColor = vec4(0.0, 0.0, 0.0, alpha);
+    outColor = vec4(0.0, 0.0, 0.0, alpha * 0.7);
   } else if (u_useUV) {
     vec4 baseColor = texture(u_texture, v_uv);
     if (u_isEmissive) {
       outColor = baseColor;
     } else {
       vec3 normal = normalize(v_normal);
-      vec3 toLight = u_lightPosition - v_worldPos;
-      float distance = length(toLight);
-      vec3 lightDir = toLight / distance;
-      float intensity = max(dot(normal, lightDir), 0.0);
-      float attenuation = 1.0 / (1.0 + u_lightFalloff * distance * distance);
+      float lightSum = 0.0;
+      for (int i = 0; i < u_numLights; i++) {
+        vec3 toLight = u_lightPositions[i] - v_worldPos;
+        float distance = length(toLight);
+        vec3 lightDir = toLight / distance;
+        float intensity = max(dot(normal, lightDir), 0.0);
+        float attenuation = 1.0 / (1.0 + u_lightFalloffs[i] * distance * distance);
+        lightSum += intensity * attenuation;
+      }
       float ambient = 0.2;
-      float lighting = ambient + (1.0 - ambient) * intensity * attenuation;
+      float lighting = ambient + (1.0 - ambient) * lightSum;
       outColor = vec4(baseColor.rgb * lighting, baseColor.a);
     }
   } else {
@@ -329,6 +339,8 @@ type GPUHandle =
     , normalBuffer :: WebGL2.Buffer
     , uvBuffer :: WebGL2.Buffer
     , indexBuffer :: WebGL2.Buffer
+    , edgeIndexBuffer :: WebGL2.Buffer
+    , edgeCount :: Int
     , drawMode :: Int
     , vertexCount :: Int
     }
@@ -377,6 +389,7 @@ data InteractionMode
         , initialRotation :: Mat4
         , initialTranslation :: Mat4
         }
+    | ActionPending { hand :: Handedness }
 
 type HandState =
     { pinching :: Boolean
@@ -387,7 +400,12 @@ type InteractionResult =
     { mode :: InteractionMode
     , sceneObjects :: Map SceneObjectId SceneObject
     , shouldSpawn :: Maybe { hand :: Handedness, position :: Vec3 }
+    , triggeredAction :: Maybe { action :: Action, position :: Vec3 }
     }
+
+-- [Action types]
+
+data Action = SpawnCube | ClearScene | SpawnLight
 
 -- [Scene types]
 
@@ -401,6 +419,8 @@ type SceneObject =
     , transform :: Transform
     , emission :: Maybe { falloff :: Number }
     , isText :: Boolean
+    , followsHead :: Boolean
+    , action :: Maybe Action
     }
 
 -- [World State type]
@@ -482,24 +502,45 @@ addCubeToScene position worldState = worldState
                 }
             , emission: Nothing
             , isText: false
+            , followsHead: false
+            , action: Nothing
             }
 
-addTextLabelToScene :: Mat4 -> WorldState -> WorldState
-addTextLabelToScene position worldState = worldState
+-- A purposeful object is one with a deliberate role in the UI: it carries
+-- an action (button) or is text (label). Cubes — including emissive ones —
+-- are content that Clear can remove.
+isPurposeful :: SceneObject -> Boolean
+isPurposeful obj = isJust obj.action || obj.isText
+
+clearScene :: WorldState -> WorldState
+clearScene worldState = worldState
+    { sceneObjects = Map.filter isPurposeful worldState.sceneObjects
+    }
+
+-- A light source emits light onto other objects. Buttons are emissive
+-- (so they self-illuminate, predictable color) but they should NOT cast
+-- light onto the scene — that role is reserved for true light objects.
+isLightSource :: SceneObject -> Boolean
+isLightSource obj = isJust obj.emission && isNothing obj.action
+
+addLightCubeToScene :: Mat4 -> WorldState -> WorldState
+addLightCubeToScene position worldState = worldState
     { sceneObjects = Map.insert newId newObject worldState.sceneObjects
     , nextObjectId = worldState.nextObjectId + 1
     }
     where
-        newId = SceneObjectId ("text-" <> show worldState.nextObjectId)
+        newId = SceneObjectId ("light-" <> show worldState.nextObjectId)
         newObject =
-            { geometryId: GeometryId "text-1"
+            { geometryId: GeometryId "cube"
             , transform:
                 { translation: position
                 , rotation: Math.Mat4.identity
-                , scale: Math.Mat4.identity
+                , scale: Math.Mat4.scale 0.4
                 }
-            , emission: Nothing
-            , isText: true
+            , emission: Just { falloff: 1.5 }
+            , isText: false
+            , followsHead: false
+            , action: Nothing
             }
 
 uploadGeometry :: forall m. MonadEffect m => WebGL2.RenderingContext -> { positionLocation :: Int, normalLocation :: Int, uvLocation :: Int } -> Geometry -> ExceptT String m GPUHandle
@@ -531,19 +572,170 @@ uploadGeometry webGL2Context locations geometry = do
     liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer (notNull indexBuffer)
     liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (Primitives.u16AsArrayBufferView (Primitives.uint16Array indices)) WebGL2.staticDraw
     liftEffect $ WebGL2.bindVertexArray webGL2Context null
+    -- Edge index buffer is set up outside the VAO. The wireframe pass binds it
+    -- on demand; the VAO retains the triangleIndices binding for normal draws.
+    edgeIndexBuffer <- makeBuffer webGL2Context
+    liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer (notNull edgeIndexBuffer)
+    liftEffect $ WebGL2.bufferData webGL2Context WebGL2.elementArrayBuffer (Primitives.u16AsArrayBufferView (Primitives.uint16Array geometry.edgeIndices)) WebGL2.staticDraw
+    liftEffect $ WebGL2.bindBuffer webGL2Context WebGL2.elementArrayBuffer null
     pure { vao
          , vertexBuffer
          , normalBuffer
          , uvBuffer
          , indexBuffer
+         , edgeIndexBuffer
+         , edgeCount: length geometry.edgeIndices
          , drawMode: topologyToDrawMode geometry.topology
          , vertexCount: length indices
          }
+
+-- Builds a free-standing text object: lays out the string into quads, uploads
+-- the geometry, and produces scene+geometry+gpu entries. The atomic primitive
+-- for "put text somewhere in the world" — used by labels, captions, menus.
+makeTextObject
+  :: forall m. MonadEffect m
+  => Atlas
+  -> WebGL2.RenderingContext
+  -> { positionLocation :: Int, normalLocation :: Int, uvLocation :: Int }
+  -> { id :: String, content :: String, position :: Vec3, scale :: Number, followsHead :: Boolean }
+  -> ExceptT String m
+       { scene :: Tuple SceneObjectId SceneObject
+       , geom :: Tuple GeometryId Geometry
+       , gpu :: Tuple GeometryId GPUHandle
+       }
+makeTextObject atlas gl locs cfg = do
+    let layout = layoutText atlas { content: cfg.content, scale: cfg.scale }
+        geom =
+            { vertices: layout.vertices
+            , normals: replicate (length layout.vertices) (Math.Vec3.vec3 0.0 0.0 1.0)
+            , uvs: layout.uvs
+            , edgeIndices: []
+            , triangleIndices: layout.triangleIndices
+            , topology: Triangles
+            }
+        geomId = GeometryId ("text-" <> cfg.id)
+        sceneId = SceneObjectId ("text-instance-" <> cfg.id)
+    handle <- uploadGeometry gl locs geom
+    let obj =
+            { geometryId: geomId
+            , transform:
+                { translation: Math.Mat4.translation cfg.position
+                , rotation: Math.Mat4.identity
+                , scale: Math.Mat4.identity
+                }
+            , emission: Nothing
+            , isText: true
+            , followsHead: cfg.followsHead
+            , action: Nothing
+            }
+    pure
+        { scene: Tuple sceneId obj
+        , geom: Tuple geomId geom
+        , gpu: Tuple geomId handle
+        }
+
+-- Approximate horizontal width of a label in world units, given monospace font
+-- (Hack at 19px advance per char). Used for centering labels above buttons.
+labelWidthApprox :: String -> Number -> Number
+labelWidthApprox content scaleFactor =
+    toNumber (length (toCharArray content)) * 19.0 * scaleFactor
+
+-- Builds a button (small emissive cube) with a centered text label above it.
+-- Composes makeTextObject for the label.
+makeButtonWithLabel
+  :: forall m. MonadEffect m
+  => Atlas
+  -> WebGL2.RenderingContext
+  -> { positionLocation :: Int, normalLocation :: Int, uvLocation :: Int }
+  -> { id :: String, position :: Vec3, label :: String, action :: Action }
+  -> ExceptT String m
+       { buttonScene :: Tuple SceneObjectId SceneObject
+       , labelScene :: Tuple SceneObjectId SceneObject
+       , labelGeom :: Tuple GeometryId Geometry
+       , labelGpu :: Tuple GeometryId GPUHandle
+       }
+makeButtonWithLabel atlas gl locs cfg = do
+    let labelScale = 0.001
+        labelHalfWidth = labelWidthApprox cfg.label labelScale * 0.5
+        labelPos = Math.Vec3.add cfg.position
+            (Math.Vec3.vec3 (-labelHalfWidth) 0.10 0.0)
+    label <- makeTextObject atlas gl locs
+        { id: cfg.id <> "-label"
+        , content: cfg.label
+        , position: labelPos
+        , scale: labelScale
+        , followsHead: true
+        }
+    let buttonId = SceneObjectId ("button-" <> cfg.id)
+        buttonObj =
+            { geometryId: GeometryId "cube"
+            , transform:
+                { translation: Math.Mat4.translation cfg.position
+                , rotation: Math.Mat4.identity
+                , scale: Math.Mat4.scale 0.5
+                }
+            , emission: Just { falloff: 1.0 }
+            , isText: false
+            , followsHead: true
+            , action: Just cfg.action
+            }
+    pure
+        { buttonScene: Tuple buttonId buttonObj
+        , labelScene: label.scene
+        , labelGeom: label.geom
+        , labelGpu: label.gpu
+        }
+
+-- Lays out a horizontal row of buttons at evenly-spaced positions around
+-- the menu's center. Returns one entry per button (button + label scene/geom/gpu).
+makeMenu
+  :: forall m. MonadEffect m
+  => Atlas
+  -> WebGL2.RenderingContext
+  -> { positionLocation :: Int, normalLocation :: Int, uvLocation :: Int }
+  -> { id :: String
+     , position :: Vec3
+     , spacing :: Number
+     , items :: Array { label :: String, action :: Action }
+     }
+  -> ExceptT String m
+       (Array { buttonScene :: Tuple SceneObjectId SceneObject
+              , labelScene :: Tuple SceneObjectId SceneObject
+              , labelGeom :: Tuple GeometryId Geometry
+              , labelGpu :: Tuple GeometryId GPUHandle
+              })
+makeMenu atlas gl locs cfg = do
+    let n = Array.length cfg.items
+        startX = -cfg.spacing * (toNumber (n - 1)) / 2.0
+        configs = mapWithIndex (\i item ->
+            { id: cfg.id <> "-" <> show i
+            , position: Math.Vec3.add cfg.position
+                (Math.Vec3.vec3 (startX + cfg.spacing * toNumber i) 0.0 0.0)
+            , label: item.label
+            , action: item.action
+            }) cfg.items
+    traverse (makeButtonWithLabel atlas gl locs) configs
 
 composeModelMatrix :: Transform -> Mat4
 composeModelMatrix transform =
     Math.Mat4.multiply transform.translation
         (Math.Mat4.multiply transform.rotation transform.scale)
+
+-- Spherical billboard: replaces Transform.rotation with one that points the
+-- object's local +Z toward the camera in full 3D (yaw + pitch). Uses world up
+-- to disambiguate the roll degree of freedom.
+composeFollowHeadModelMatrix :: Vec3 -> Transform -> Mat4
+composeFollowHeadModelMatrix cameraPos transform =
+    let objPos = Math.Mat4.translationOf transform.translation
+        toCam = Math.Vec3.sub cameraPos objPos
+        forward = fromMaybe (Math.Vec3.vec3 0.0 0.0 1.0) (Math.Vec3.normalize toCam)
+        worldUp = Math.Vec3.vec3 0.0 1.0 0.0
+        right = fromMaybe (Math.Vec3.vec3 1.0 0.0 0.0)
+                   (Math.Vec3.normalize (Math.Vec3.cross worldUp forward))
+        up = Math.Vec3.cross forward right
+        rotation = Math.Mat4.fromBasis right up forward
+    in Math.Mat4.multiply transform.translation
+            (Math.Mat4.multiply rotation transform.scale)
 
 findHitObject
     :: { origin :: Vec3, direction :: Vec3 }
@@ -577,18 +769,22 @@ findNearestObject pinchPoint sceneObjects =
     go entries acc = case uncons entries of
         Nothing -> fst <$> acc
         Just { head: Tuple objId obj, tail: rest } ->
-            let modelMatrix = composeModelMatrix obj.transform
-                objPos = Math.Mat4.translationOf modelMatrix
-                dist = Math.Vec3.distance pinchPoint objPos
-                objScale = Math.Mat4.scaleOf modelMatrix
-                adjustedRadius = grabRadius * objScale
-            in if dist < adjustedRadius
-                then case acc of
-                    Nothing -> go rest (Just (Tuple objId dist))
-                    Just (Tuple _ prevDist)
-                        | dist < prevDist -> go rest (Just (Tuple objId dist))
-                        | otherwise -> go rest acc
-                else go rest acc
+            -- Text labels are decorative; they are not pickable.
+            if obj.isText
+                then go rest acc
+                else
+                    let modelMatrix = composeModelMatrix obj.transform
+                        objPos = Math.Mat4.translationOf modelMatrix
+                        dist = Math.Vec3.distance pinchPoint objPos
+                        objScale = Math.Mat4.scaleOf modelMatrix
+                        adjustedRadius = grabRadius * objScale
+                    in if dist < adjustedRadius
+                        then case acc of
+                            Nothing -> go rest (Just (Tuple objId dist))
+                            Just (Tuple _ prevDist)
+                                | dist < prevDist -> go rest (Just (Tuple objId dist))
+                                | otherwise -> go rest acc
+                        else go rest acc
 
 updateInteraction 
     :: HandState
@@ -610,6 +806,13 @@ updateInteraction left right sceneObjects mode = case mode of
             | not right.pinching -> idle
             | left.pinching -> enterTwoHand left.position right.position state
             | otherwise -> applyOneHand right.position state
+    ActionPending state ->
+        let stillHolding = case state.hand of
+                LeftHand -> left.pinching
+                RightHand -> right.pinching
+        in if stillHolding
+            then { mode: ActionPending state, sceneObjects, shouldSpawn: Nothing, triggeredAction: Nothing }
+            else idle
     TwoHandManipulate state -> case left.pinching, right.pinching of
         false, false -> idle
         true, false ->
@@ -619,6 +822,7 @@ updateInteraction left right sceneObjects mode = case mode of
                     in { mode: OneHandManipulate { hand: LeftHand, objectId: state.objectId, grabOffset: Math.Vec3.sub left.position objPos }
                        , sceneObjects
                        , shouldSpawn: Nothing
+                       , triggeredAction: Nothing
                        }
                 Nothing -> idle
         false, true ->
@@ -628,26 +832,41 @@ updateInteraction left right sceneObjects mode = case mode of
                     in { mode: OneHandManipulate { hand: RightHand, objectId: state.objectId, grabOffset: Math.Vec3.sub right.position objPos }
                        , sceneObjects
                        , shouldSpawn: Nothing
+                       , triggeredAction: Nothing
                        }
                 Nothing -> idle
         true, true -> applyTwoHand left.position right.position state
     where
-    idle = { mode: Observing, sceneObjects, shouldSpawn: Nothing }
+    idle = { mode: Observing, sceneObjects, shouldSpawn: Nothing, triggeredAction: Nothing }
     tryGrab hand pos =
         case findNearestObject pos sceneObjects of
             Just objId -> case Map.lookup objId sceneObjects of
-                Just obj ->
-                    let objPos = Math.Mat4.translationOf (composeModelMatrix obj.transform)
-                    in { mode: OneHandManipulate { hand, objectId: objId, grabOffset: Math.Vec3.sub pos objPos }
-                       , sceneObjects
-                       , shouldSpawn: Nothing
-                       }
+                Just obj -> case obj.action of
+                    Just action ->
+                        let objPos = Math.Mat4.translationOf (composeModelMatrix obj.transform)
+                        in { mode: ActionPending { hand }
+                           , sceneObjects
+                           , shouldSpawn: Nothing
+                           , triggeredAction: Just { action, position: objPos }
+                           }
+                    Nothing ->
+                        let objPos = Math.Mat4.translationOf (composeModelMatrix obj.transform)
+                        in { mode: OneHandManipulate { hand, objectId: objId, grabOffset: Math.Vec3.sub pos objPos }
+                           , sceneObjects
+                           , shouldSpawn: Nothing
+                           , triggeredAction: Nothing
+                           }
                 Nothing -> idle
-            Nothing -> { mode: Observing, sceneObjects, shouldSpawn: Just { hand, position: pos } }
+            Nothing ->
+                { mode: Observing
+                , sceneObjects
+                , shouldSpawn: Just { hand, position: pos }
+                , triggeredAction: Nothing
+                }
     applyOneHand pos state =
         let newPos = Math.Vec3.sub pos state.grabOffset
             newSceneObjects = Map.update (\obj -> Just obj { transform = obj.transform { translation = Math.Mat4.translation newPos } }) state.objectId sceneObjects
-        in { mode: OneHandManipulate state, sceneObjects: newSceneObjects, shouldSpawn: Nothing }
+        in { mode: OneHandManipulate state, sceneObjects: newSceneObjects, shouldSpawn: Nothing, triggeredAction: Nothing }
     enterTwoHand leftPos rightPos state =
         case Map.lookup state.objectId sceneObjects of
             Just obj ->
@@ -662,6 +881,7 @@ updateInteraction left right sceneObjects mode = case mode of
                     }
                 , sceneObjects
                 , shouldSpawn: Nothing
+                , triggeredAction: Nothing
                 }
             Nothing -> idle
     applyTwoHand leftPos rightPos state =
@@ -673,7 +893,10 @@ updateInteraction left right sceneObjects mode = case mode of
             midpointDelta = Math.Vec3.sub currentMidpoint state.initialMidpoint
             newTranslation = Math.Mat4.translation (Math.Vec3.add initialPos midpointDelta)
 
-            newScale = Math.Mat4.scale scaleFactor
+            -- Apply scaleFactor relative to the scale captured when two-hand started,
+            -- so re-entering two-hand on an already-scaled object preserves its size.
+            initialScaleFactor = Math.Mat4.scaleOf state.initialScale
+            newScale = Math.Mat4.scale (initialScaleFactor * scaleFactor)
 
             currentDirection = fromMaybe Math.Vec3.zero (Math.Vec3.normalize (Math.Vec3.sub rightPos leftPos))
             rotationAxis = Math.Vec3.cross state.initialDirection currentDirection
@@ -692,7 +915,7 @@ updateInteraction left right sceneObjects mode = case mode of
                     , rotation = newRotation
                     }
                 }) state.objectId sceneObjects
-        in { mode: TwoHandManipulate state, sceneObjects: newSceneObjects, shouldSpawn: Nothing }
+        in { mode: TwoHandManipulate state, sceneObjects: newSceneObjects, shouldSpawn: Nothing, triggeredAction: Nothing }
 
 
 -- [Main]
@@ -741,7 +964,7 @@ main = launchAff_ do
         liftEffect $ WebGL2.uniformMatrix4fv webGL2Context modelLocation false (Math.Mat4.toFloat32Array Math.Mat4.identity)
 
         colorLocation <- findUniformLocation webGL2Context program "u_color"
-        liftEffect $ WebGL2.uniform4fv webGL2Context colorLocation (Primitives.float32Array [0.0, 0.8, 0.0, 1.0])
+        liftEffect $ WebGL2.uniform4fv webGL2Context colorLocation (Primitives.float32Array [0.0, 0.0, 0.0, 1.0])
 
         useUVLocation <- findUniformLocation webGL2Context program "u_useUV"
         liftEffect $ WebGL2.uniform1i webGL2Context useUVLocation 0
@@ -755,11 +978,10 @@ main = launchAff_ do
         isTextLocation <- findUniformLocation webGL2Context program "u_isText"
         liftEffect $ WebGL2.uniform1i webGL2Context isTextLocation 0
 
-        lightPositionLocation <- findUniformLocation webGL2Context program "u_lightPosition"
-        liftEffect $ WebGL2.uniform3fv webGL2Context lightPositionLocation (Math.Vec3.toFloat32Array Math.Vec3.zero)
-
-        lightFalloffLocation <- findUniformLocation webGL2Context program "u_lightFalloff"
-        liftEffect $ WebGL2.uniform1f webGL2Context lightFalloffLocation 1.0
+        lightPositionsLocation <- findUniformLocation webGL2Context program "u_lightPositions"
+        lightFalloffsLocation <- findUniformLocation webGL2Context program "u_lightFalloffs"
+        numLightsLocation <- findUniformLocation webGL2Context program "u_numLights"
+        liftEffect $ WebGL2.uniform1i webGL2Context numLightsLocation 0
 
         pxRangeLocation <- findUniformLocation webGL2Context program "u_pxRange"
 
@@ -802,45 +1024,32 @@ main = launchAff_ do
                     }
                 , emission: Just { falloff: 1.0 }
                 , isText: false
+                , followsHead: false
+                , action: Nothing
                 }
 
-        let textLayout = layoutText atlas { content: "Example text", scale: 0.005 }
-            textGeometryId = GeometryId "text-1"
-            textGeometry =
-                { vertices: textLayout.vertices
-                , normals: replicate (length textLayout.vertices) (Math.Vec3.vec3 0.0 0.0 1.0)
-                , uvs: textLayout.uvs
-                , edgeIndices: []
-                , triangleIndices: textLayout.triangleIndices
-                , topology: Triangles
-                }
+        let attribLocs = { positionLocation, normalLocation, uvLocation }
+        mainMenu <- makeMenu atlas webGL2Context attribLocs
+            { id: "main"
+            , position: Math.Vec3.vec3 0.0 0.0 (-0.4)
+            , spacing: 0.2
+            , items:
+                [ { label: "Light", action: SpawnLight }
+                , { label: "Spawn", action: SpawnCube }
+                , { label: "Clear", action: ClearScene }
+                ]
+            }
 
-        textGPUHandle <- uploadGeometry webGL2Context { positionLocation, normalLocation, uvLocation } textGeometry
-
-        let textSceneObjectId = SceneObjectId "text-instance-1"
-            textSceneObject =
-                { geometryId: textGeometryId
-                , transform:
-                    { translation: Math.Mat4.translation (Math.Vec3.vec3 0.0 0.0 (-0.5))
-                    , rotation: Math.Mat4.identity
-                    , scale: Math.Mat4.identity
-                    }
-                , emission: Nothing
-                , isText: true
-                }
+        let menuSceneEntries = concatMap (\b -> [b.buttonScene, b.labelScene]) mainMenu
+            menuGeomEntries = map _.labelGeom mainMenu
+            menuGpuEntries = map _.labelGpu mainMenu
 
         let sceneObjects = Map.fromFoldable
-                [ Tuple cubeSceneObjectId cubeSceneObject
-                , Tuple textSceneObjectId textSceneObject
-                ]
+                ([ Tuple cubeSceneObjectId cubeSceneObject ] <> menuSceneEntries)
             geometries = Map.fromFoldable
-                [ Tuple cubeGeometryId cubeGeometry
-                , Tuple textGeometryId textGeometry
-                ]
+                ([ Tuple cubeGeometryId cubeGeometry ] <> menuGeomEntries)
             gpuHandles = Map.fromFoldable
-                [ Tuple cubeGeometryId cubeGPUHandle
-                , Tuple textGeometryId textGPUHandle
-                ]
+                ([ Tuple cubeGeometryId cubeGPUHandle ] <> menuGpuEntries)
 
         let initialWorldState =
                 { geometries
@@ -979,8 +1188,13 @@ main = launchAff_ do
 
                             worldState <- liftEffect $ Ref.read worldStateRef
 
-                            let leftHand = { pinching: leftIsPinching, position: leftIndexFingerTipPosition }
-                            let rightHand = { pinching: rightIsPinching, position: rightIndexFingerTipPosition }
+                            -- Pinch position is the midpoint between thumb and index tips.
+                            -- This is more stable than tracking the index alone: as the fingers
+                            -- come together to pinch, the midpoint barely moves.
+                            let leftPinchPos = Math.Vec3.midpoint leftIndexFingerTipPosition leftThumbTipPosition
+                                rightPinchPos = Math.Vec3.midpoint rightIndexFingerTipPosition rightThumbTipPosition
+                            let leftHand = { pinching: leftIsPinching, position: leftPinchPos }
+                            let rightHand = { pinching: rightIsPinching, position: rightPinchPos }
                             let interactionResult = updateInteraction leftHand rightHand worldState.sceneObjects worldState.interaction
 
                             liftEffect $ Ref.modify_ (\ws -> ws 
@@ -992,17 +1206,29 @@ main = launchAff_ do
                                 Just spawn -> do
                                     let translationMatrix = Math.Mat4.translation spawn.position
                                     liftEffect $ Ref.modify_ (addCubeToScene translationMatrix) worldStateRef
-                                    roll <- liftEffect random
-                                    when (roll < 0.5) do
-                                        let labelOffset = Math.Vec3.vec3 0.0 0.18 0.0
-                                            labelPosition = Math.Mat4.translation (Math.Vec3.add spawn.position labelOffset)
-                                        liftEffect $ Ref.modify_ (addTextLabelToScene labelPosition) worldStateRef
+                                Nothing -> pure unit
+
+                            case interactionResult.triggeredAction of
+                                Just trigger -> case trigger.action of
+                                    SpawnCube -> do
+                                        let popUpOffset = Math.Vec3.vec3 0.0 0.25 0.0
+                                            spawnPos = Math.Vec3.add trigger.position popUpOffset
+                                            translationMatrix = Math.Mat4.translation spawnPos
+                                        liftEffect $ Ref.modify_ (addCubeToScene translationMatrix) worldStateRef
+                                    ClearScene ->
+                                        liftEffect $ Ref.modify_ clearScene worldStateRef
+                                    SpawnLight -> liftEffect do
+                                        rx <- random
+                                        ry <- random
+                                        rz <- random
+                                        let pos = Math.Vec3.vec3 ((rx - 0.5) * 0.8) ((ry - 0.5) * 0.6) ((rz - 0.5) * 0.6 - 0.4)
+                                        Ref.modify_ (addLightCubeToScene (Math.Mat4.translation pos)) worldStateRef
                                 Nothing -> pure unit
 
                             -- [Managing rendering]
                             framebuffer <- liftEffect $ WebXR.getFramebuffer xrGLLayer
                             liftEffect $ WebGL2.bindFramebuffer xrWebGL2Context WebGL2.framebuffer (notNull framebuffer)
-                            liftEffect $ WebGL2.clearColor xrWebGL2Context 0.0 0.0 0.0 1.0
+                            liftEffect $ WebGL2.clearColor xrWebGL2Context 0.8 0.8 0.8 0.1
                             liftEffect $ WebGL2.clear xrWebGL2Context (WebGL2.colorBufferBit .|. WebGL2.depthBufferBit)
 
                             nullableViewerPose <- liftEffect $ WebXR.getViewerPose frame referenceSpace
@@ -1010,29 +1236,54 @@ main = launchAff_ do
                               Nothing -> pure unit
                               Just viewerPose -> do
                                 views <- liftEffect $ WebXR.getViews viewerPose
+                                cameraPosArr <- liftEffect $ WebXR.getViewerPosePosition viewerPose
+                                let cameraPos = Math.Vec3.fromFloat32Array cameraPosArr
                                 updatedWorldState <- liftEffect $ Ref.read worldStateRef
+                                let hoverRadius = 0.15
+                                    isWithinReach handPos obj =
+                                        let m = composeModelMatrix obj.transform
+                                            objPos = Math.Mat4.translationOf m
+                                            objScale = Math.Mat4.scaleOf m
+                                        in Math.Vec3.distance handPos objPos < hoverRadius * objScale
+                                    isHoveredObj obj = not obj.isText
+                                                    && (isWithinReach leftPinchPos obj
+                                                     || isWithinReach rightPinchPos obj)
                                 let asDrawable obj = case Map.lookup obj.geometryId updatedWorldState.gpuHandles of
                                       Nothing -> Nothing
-                                      Just gpu -> Just
-                                        { gpu
-                                        , modelMatrix: Math.Mat4.toFloat32Array (composeModelMatrix obj.transform)
-                                        , isEmissive: isJust obj.emission
-                                        , isText: obj.isText
-                                        , texture: if obj.isText then atlas.texture else checkerTexture
-                                        }
+                                      Just gpu ->
+                                        let modelMatrix = if obj.followsHead
+                                                then composeFollowHeadModelMatrix cameraPos obj.transform
+                                                else composeModelMatrix obj.transform
+                                        in Just
+                                            { gpu
+                                            , modelMatrix: Math.Mat4.toFloat32Array modelMatrix
+                                            , isEmissive: isJust obj.emission
+                                            , isText: obj.isText
+                                            , isHovered: isHoveredObj obj
+                                            , texture: if obj.isText then atlas.texture else checkerTexture
+                                            }
                                     drawables = List.mapMaybe asDrawable (Map.values updatedWorldState.sceneObjects)
 
-                                -- [Uploading first emissive scene object as the active light]
-                                let emissiveObjects = List.filter (isJust <<< _.emission) (Map.values updatedWorldState.sceneObjects)
-                                case List.head emissiveObjects of
-                                  Just emissiveObj -> do
-                                      let lightPos = Math.Mat4.translationOf (composeModelMatrix emissiveObj.transform)
-                                          lightFalloff = case emissiveObj.emission of
-                                              Just e -> e.falloff
-                                              Nothing -> 1.0
-                                      liftEffect $ WebGL2.uniform3fv xrWebGL2Context lightPositionLocation (Math.Vec3.toFloat32Array lightPos)
-                                      liftEffect $ WebGL2.uniform1f xrWebGL2Context lightFalloffLocation lightFalloff
-                                  Nothing -> pure unit
+                                -- [Uploading all light sources, capped to MAX_LIGHTS = 8]
+                                let lightArr = Array.fromFoldable
+                                        (List.take 8
+                                            (List.filter isLightSource
+                                                (Map.values updatedWorldState.sceneObjects)))
+                                    lightPositionsArr = concatMap
+                                        (\obj -> Math.Vec3.toArray
+                                            (Math.Mat4.translationOf (composeModelMatrix obj.transform)))
+                                        lightArr
+                                    lightFalloffsArr = map
+                                        (\obj -> case obj.emission of
+                                            Just e -> e.falloff
+                                            Nothing -> 1.0)
+                                        lightArr
+                                liftEffect $ WebGL2.uniform3fv xrWebGL2Context lightPositionsLocation
+                                    (Primitives.float32Array lightPositionsArr)
+                                liftEffect $ WebGL2.uniform1fv xrWebGL2Context lightFalloffsLocation
+                                    (Primitives.float32Array lightFalloffsArr)
+                                liftEffect $ WebGL2.uniform1i xrWebGL2Context numLightsLocation
+                                    (Array.length lightArr)
 
                                 for_ views \view -> do
                                   -- [Managing rendering for each view (eye)]
@@ -1074,6 +1325,27 @@ main = launchAff_ do
                                       liftEffect $ WebGL2.bindTexture xrWebGL2Context WebGL2.texture2D (notNull drawable.texture)
                                       liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull drawable.gpu.vao)
                                       liftEffect $ WebGL2.drawElements xrWebGL2Context drawable.gpu.drawMode drawable.gpu.vertexCount WebGL2.unsignedShort 0
+
+                                  -- [Wireframe overlay for hovered objects]
+                                  -- Drawn after main pass with depth test off so lines sit on top
+                                  -- of the cube faces. Uses the solid-color path (u_useUV=0).
+                                  let hovered = List.filter (\d -> d.isHovered && d.gpu.edgeCount > 0) drawables
+                                  unless (List.null hovered) do
+                                      liftEffect $ WebGL2.disable xrWebGL2Context WebGL2.depthTest
+                                      liftEffect $ WebGL2.uniform1i xrWebGL2Context useUVLocation 0
+                                      liftEffect $ WebGL2.uniform1i xrWebGL2Context isTextLocation 0
+                                      liftEffect $ WebGL2.uniform1i xrWebGL2Context isEmissiveLocation 0
+                                      liftEffect $ WebGL2.uniform4fv xrWebGL2Context colorLocation
+                                          (Primitives.float32Array [1.0, 1.0, 0.0, 1.0])
+                                      for_ hovered \drawable -> do
+                                          liftEffect $ WebGL2.uniformMatrix4fv xrWebGL2Context modelLocation false drawable.modelMatrix
+                                          liftEffect $ WebGL2.bindVertexArray xrWebGL2Context (notNull drawable.gpu.vao)
+                                          liftEffect $ WebGL2.bindBuffer xrWebGL2Context WebGL2.elementArrayBuffer (notNull drawable.gpu.edgeIndexBuffer)
+                                          liftEffect $ WebGL2.drawElements xrWebGL2Context WebGL2.lines drawable.gpu.edgeCount WebGL2.unsignedShort 0
+                                          -- Restore the VAO's stored element-array binding so the next frame's
+                                          -- main pass uses triangle indices, not edges.
+                                          liftEffect $ WebGL2.bindBuffer xrWebGL2Context WebGL2.elementArrayBuffer (notNull drawable.gpu.indexBuffer)
+                                      liftEffect $ WebGL2.enable xrWebGL2Context WebGL2.depthTest
                         case result of
                             Left err -> log err
                             Right _ -> pure unit

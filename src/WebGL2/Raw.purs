@@ -78,6 +78,8 @@ foreign import uniform1f
     :: RenderingContext -> UniformLocation -> Number -> Effect Unit
 foreign import uniform3fv
     :: RenderingContext -> UniformLocation -> Float32Array -> Effect Unit
+foreign import uniform1fv
+    :: RenderingContext -> UniformLocation -> Float32Array -> Effect Unit
 
 
 foreign import data VertexArrayObject :: Type
@@ -130,6 +132,7 @@ oneMinusSrcAlpha :: Int
 oneMinusSrcAlpha = 0x0303
 
 foreign import enable :: RenderingContext -> Int -> Effect Unit
+foreign import disable :: RenderingContext -> Int -> Effect Unit
 foreign import blendFunc :: RenderingContext -> Int -> Int -> Effect Unit
 
 foreign import data Texture :: Type

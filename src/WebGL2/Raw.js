@@ -23,6 +23,7 @@ export const uniform4fv = (gl) => (location) => (value) => () => gl.uniform4fv(l
 export const uniform1i = (gl) => (location) => (value) => () => gl.uniform1i(location, value);
 export const uniform1f = (gl) => (location) => (value) => () => gl.uniform1f(location, value);
 export const uniform3fv = (gl) => (location) => (value) => () => gl.uniform3fv(location, value);
+export const uniform1fv = (gl) => (location) => (value) => () => gl.uniform1fv(location, value);
 
 export const createVertexArray = (gl) => () => gl.createVertexArray();
 export const bindVertexArray = (gl) => (vao) => () => gl.bindVertexArray(vao);
@@ -33,6 +34,7 @@ export const vertexAttribPointer = (gl) => (index) => (size) => (type) => (norma
 export const enableVertexAttribArray = (gl) => (index) => () => gl.enableVertexAttribArray(index);
 
 export const enable = (gl) => (capability) => () => gl.enable(capability);
+export const disable = (gl) => (capability) => () => gl.disable(capability);
 export const blendFunc = (gl) => (sfactor) => (dfactor) => () => gl.blendFunc(sfactor, dfactor);
 
 export const bufferSubData = (gl) => (target) => (offset) => (data) => () => gl.bufferSubData(target, offset, data);

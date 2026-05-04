@@ -7,6 +7,7 @@ module Math.Mat4
   , scale
   , scaleOf
   , axisAngleRotation
+  , fromBasis
   , transformPoint
   , toFloat32Array
   , fromFloat32Array
@@ -58,6 +59,20 @@ scaleOf (Mat4 m) = scaleOfImpl m
 axisAngleRotation :: Vec3 -> Number -> Number -> Mat4
 axisAngleRotation axis cosAngle sinAngle =
   Mat4 (axisAngleRotationImpl (Math.Vec3.toFloat32Array axis) cosAngle sinAngle)
+
+-- Build a rotation matrix from three orthonormal basis vectors as columns
+-- (right, up, forward). The result rotates from local space to world space
+-- such that local +X aligns with right, +Y with up, +Z with forward.
+fromBasis :: Vec3 -> Vec3 -> Vec3 -> Mat4
+fromBasis r u f = case Math.Vec3.toArray r, Math.Vec3.toArray u, Math.Vec3.toArray f of
+  [rx, ry, rz], [ux, uy, uz], [fx, fy, fz] ->
+    Mat4 (float32Array
+      [ rx, ry, rz, 0.0
+      , ux, uy, uz, 0.0
+      , fx, fy, fz, 0.0
+      , 0.0, 0.0, 0.0, 1.0
+      ])
+  _, _, _ -> identity
 
 transformPoint :: Mat4 -> Vec3 -> Vec3
 transformPoint (Mat4 m) v =

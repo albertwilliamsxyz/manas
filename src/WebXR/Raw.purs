@@ -41,6 +41,7 @@ foreign import data XRJointSpace :: Type
 type XRFrameRequestCallback = Number -> XRFrame -> Effect Unit
 
 foreign import getViewerPose :: XRFrame -> ReferenceSpace -> Effect (Nullable XRViewerPose)
+foreign import getViewerPosePosition :: XRViewerPose -> Effect Primitives.Float32Array
 foreign import getJointPose :: XRFrame -> XRJointSpace -> ReferenceSpace -> Effect (Nullable XRJointPose)
 foreign import requestAnimationFrame :: XRSession -> XRFrameRequestCallback -> Effect Int
 

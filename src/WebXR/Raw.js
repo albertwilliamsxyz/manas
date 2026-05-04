@@ -19,6 +19,11 @@ export const requestAnimationFrame = (session) => (callback) => () =>
 export const getViewerPose = (frame) => (referenceSpace) => () =>
   frame.getViewerPose(referenceSpace) || null;
 
+export const getViewerPosePosition = (pose) => () => {
+  const p = pose.transform.position;
+  return new Float32Array([p.x, p.y, p.z]);
+};
+
 export const getJointPose = (frame) => (jointSpace) => (referenceSpace) => () => {
   if (!frame.getJointPose) return null;
   return frame.getJointPose(jointSpace, referenceSpace) || null;
