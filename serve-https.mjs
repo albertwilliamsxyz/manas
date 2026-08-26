@@ -8,8 +8,9 @@
  * Usage:
  *   node serve-https.mjs
  *
- * Then on Meta Quest browser: https://192.168.0.104:3443
- * Accept the "connection not private" warning once, then the app loads.
+ * The server prints its LAN address on startup. Open that address in the
+ * Meta Quest browser, accept the "connection not private" warning once,
+ * and the app loads.
  *
  * To rebuild PureScript and refresh:
  *   npm run build  (in a separate terminal)
@@ -17,6 +18,7 @@
 
 import https from 'https'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
@@ -26,10 +28,26 @@ const PORT = 3443
 const ROOT = __dirname
 
 // ---------------------------------------------------------------------------
+// LAN address discovery
+// ---------------------------------------------------------------------------
+// The headset reaches this machine over the local network, so the certificate
+// has to name the LAN address, not just localhost. First non-internal IPv4
+// interface wins; falls back to localhost if there is no LAN at all.
+
+const findLANAddress = () => {
+    const interfaces = Object.values(os.networkInterfaces()).flat()
+    const lan = interfaces.find((i) => i && i.family === 'IPv4' && !i.internal)
+    return lan ? lan.address : '127.0.0.1'
+}
+
+const HOST = findLANAddress()
+
+// ---------------------------------------------------------------------------
 // Self-signed certificate generation
 // ---------------------------------------------------------------------------
-// We generate the cert fresh each run using openssl (available on macOS by default).
-// The cert is kept in memory only — never written to disk.
+// We generate the cert once using openssl (available on macOS by default) and
+// cache it as .dev-key.pem / .dev-cert.pem, both gitignored. Delete those two
+// files to regenerate — needed if this machine's LAN address changes.
 //
 // If you want the Meta Quest browser to fully trust the cert without a warning,
 // follow the MKCERT instructions at the bottom of this file instead.
@@ -45,7 +63,7 @@ const generateSelfSignedCert = () => {
             execSync(
                 `openssl req -x509 -newkey rsa:2048 -keyout "${keyFile}" -out "${certFile}" ` +
                 `-days 365 -nodes -subj "/CN=localhost" ` +
-                `-addext "subjectAltName=IP:192.168.0.104,IP:127.0.0.1,DNS:localhost"`,
+                `-addext "subjectAltName=IP:${HOST},IP:127.0.0.1,DNS:localhost"`,
                 { stdio: 'pipe' }
             )
             console.log('Certificate generated.')
@@ -129,9 +147,9 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log('  HTTPS dev server running')
     console.log()
     console.log('  Local:   https://localhost:' + PORT)
-    console.log('  Network: https://192.168.0.104:' + PORT)
+    console.log('  Network: https://' + HOST + ':' + PORT)
     console.log()
-    console.log('  On Meta Quest browser → open: https://192.168.0.104:' + PORT)
+    console.log('  On Meta Quest browser → open: https://' + HOST + ':' + PORT)
     console.log('  Accept the "connection not private" warning → Advanced → Proceed')
     console.log()
     console.log('  Rebuild: npm run build  (in another terminal)')
@@ -150,14 +168,15 @@ If you want zero warnings on the Quest:
      brew install mkcert
      mkcert -install
 
-2. Generate a cert for your local IP:
-     mkcert 192.168.0.104 localhost 127.0.0.1
+2. Generate a cert for your local IP (the address this server prints
+   on startup — <LAN-IP> below):
+     mkcert <LAN-IP> localhost 127.0.0.1
 
-   This creates: 192.168.0.104+2.pem  and  192.168.0.104+2-key.pem
+   This creates: <LAN-IP>+2.pem  and  <LAN-IP>+2-key.pem
 
 3. Update this file to load those files instead of the generated ones:
-     key:  fs.readFileSync('192.168.0.104+2-key.pem')
-     cert: fs.readFileSync('192.168.0.104+2.pem')
+     key:  fs.readFileSync('<LAN-IP>+2-key.pem')
+     cert: fs.readFileSync('<LAN-IP>+2.pem')
 
 4. To trust the cert on Meta Quest:
    a. Find mkcert's root CA: mkcert -CAROOT

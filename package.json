@@ -1,12 +1,7 @@
 {
   "name": "manas",
   "version": "1.0.0",
-  "description": "This program aims to elevate human cognition by providing an immersive, holistic experience. Users can express and experiment with any model of the world they imagine, using a general framework that allows ideas to be run or evaluated in a live environment.",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs",
-    "test": "test"
-  },
+  "description": "A spatial mathematical instrument: a browser-native, hand-tracked WebXR/AR engine written in PureScript with WebGL2.",
   "scripts": {
     "build": "spago bundle --module Main --outfile dist/main.js --platform browser",
     "serve": "npx --yes serve . -p 3000",
@@ -16,14 +11,23 @@
     "type": "git",
     "url": "git+https://github.com/albertwilliamsxyz/manas.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "webxr",
+    "webgl2",
+    "purescript",
+    "augmented-reality",
+    "hand-tracking",
+    "functional-programming"
+  ],
+  "author": "Albert Williams",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/albertwilliamsxyz/manas/issues"
   },
   "homepage": "https://github.com/albertwilliamsxyz/manas#readme",
   "devDependencies": {
-    "esbuild": "^0.27.3"
+    "esbuild": "^0.27.3",
+    "purescript": "^0.15.15",
+    "spago": "^1.0.4"
   }
 }
