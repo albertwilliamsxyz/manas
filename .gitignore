@@ -1,9 +1,27 @@
-/.spago
+# Dependencies
 /node_modules
-/tmp
-/dist
+
+# PureScript / Spago build outputs
+/.spago
 /output
+/dist
+/tmp
+.psci_modules
+.psc-ide-port
+
+# Local HTTPS dev certificates
 .dev-key.pem
 .dev-cert.pem
-.psc-ide-port
+*.pem
+
+# Secrets and local environment
+.env
+.env.*
+
+# Editor / OS
 *.session
+.DS_Store
+
+# Local working files (not part of the published project)
+/.claude
+/Design.pdf
