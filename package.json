@@ -2,11 +2,6 @@
   "name": "manas",
   "version": "1.0.0",
   "description": "A spatial mathematical instrument: a browser-native, hand-tracked WebXR/AR engine written in PureScript with WebGL2.",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs",
-    "test": "test"
-  },
   "scripts": {
     "build": "spago bundle --module Main --outfile dist/main.js --platform browser",
     "serve": "npx --yes serve . -p 3000",
