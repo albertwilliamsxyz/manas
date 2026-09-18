@@ -46,12 +46,9 @@ Everything below is implemented in `main` and running on device.
 
 Stated plainly, so nothing here oversells:
 
-- **Cube is the only primitive.** No spheres, cones or cylinders in `main` yet.
 - **Textures are one procedural checker.** Image loading and `makeTextureFromImage` exist and work, but are used only for the font atlas.
 - **Lighting is diffuse only** — no specular, no Phong highlight, no shadows. An object between a light and a surface does not occlude it.
 - **Hands only.** `ControllerInput` types exist but are never populated; there is no gamepad path.
-- **Ray picking is written but unused.** A Möller–Trumbore ray–triangle intersection and a `findHitObject` wrapper are implemented and correct, but selection currently goes through the proximity path instead.
-- **No tests.** `test/Test/Main.purs` is the Spago placeholder.
 
 ## Requirements
 
